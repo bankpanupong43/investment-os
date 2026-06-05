@@ -105,8 +105,9 @@ export default function DashboardPage() {
   }, []);
 
   const totalInvested = positions.reduce((s, p) => s + (positionCostBasis(p) ?? 0), 0);
-  const avgConfidence = positions.length
-    ? positions.reduce((s, p) => s + (p.thesis?.entryConfidence ?? 0), 0) / positions.length
+  const positionsWithThesis = positions.filter(p => p.thesis != null);
+  const avgConfidence = positionsWithThesis.length
+    ? positionsWithThesis.reduce((s, p) => s + (p.thesis!.entryConfidence ?? 0), 0) / positionsWithThesis.length
     : 0;
   const allRecs = positions.flatMap(p => p.recommendations);
   const triggeredKills = positions.reduce((s, p) => s + p.killConditions.filter(k => k.status === "triggered").length, 0);
@@ -154,7 +155,7 @@ export default function DashboardPage() {
       {/* Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard label="Total Invested" value={fmt(totalInvested)} sub={`${positions.length} active position${positions.length !== 1 ? "s" : ""}`} />
-        <MetricCard label="Entry Confidence" value={`${avgConfidence.toFixed(1)} / 10`} sub="average at entry" />
+        <MetricCard label="Entry Confidence" value={positionsWithThesis.length ? `${avgConfidence.toFixed(1)} / 10` : "—"} sub={positionsWithThesis.length ? `${positionsWithThesis.length} position${positionsWithThesis.length !== 1 ? "s" : ""} with thesis` : "no theses yet"} />
         <MetricCard label="Pending Actions" value={String(allRecs.length)} sub="awaiting review" highlight={allRecs.length > 2} />
         <MetricCard label="Triggered Stops" value={String(triggeredKills)} sub="kill conditions hit" highlight={triggeredKills > 0} />
       </div>
