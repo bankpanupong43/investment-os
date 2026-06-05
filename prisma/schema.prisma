@@ -337,6 +337,41 @@ model AgentBriefing {
   @@map("agent_briefings")
 }
 
+// ─── PortfolioSettings ────────────────────────────────────────────────────────
+// Single-row config table for top-level portfolio parameters.
+
+model PortfolioSettings {
+  id              String   @id @default(cuid())
+  label           String   @default("Main Portfolio")
+  totalCapitalThb Float    // ฿1,300,000 — audited total invested capital
+  totalCapitalUsd Float    // $39,816.22 at seed-time exchange rate
+  exchangeRate    Float    // 32.65 THB/USD at seed time
+  source          String?  // data provenance note
+  updatedAt       DateTime @updatedAt
+
+  @@map("portfolio_settings")
+}
+
+// ─── AllocationTarget ─────────────────────────────────────────────────────────
+// Target allocation per ticker from the investment plan.
+// Joined at runtime with Position snapshot data to compute gaps and rankings.
+
+model AllocationTarget {
+  id        String   @id @default(cuid())
+  ticker    String   @unique
+  name      String
+  targetPct Float    // 0–100, percentage of totalCapitalUsd
+  targetUsd Float    // absolute USD target amount
+  targetThb Float    // absolute THB target amount
+  bucket    String   // growth | core | small | defensive | value
+  priority  Int      // buy priority rank — lower = buy first
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("allocation_targets")
+}
+
 // ─── Brief ────────────────────────────────────────────────────────────────────
 
 model Brief {
