@@ -1,18 +1,29 @@
 #Requires -Version 5
 $ErrorActionPreference = 'Stop'
 
-# Candidate 1: any subfolder on G: named investment-os-data (Google Drive, language-agnostic)
-$gdrive = Get-Item 'G:\*\*\investment-os-data' -ErrorAction SilentlyContinue |
-          Select-Object -First 1 -ExpandProperty FullName
+# Candidate 1: known exact path (Google Drive on this machine)
+$exact = 'G:\คอมพิวเตอร์เครื่องอื่นๆ\คอมพิวเตอร์ของฉัน\Shared\investment-os-data'
 
-# Candidate 2: sibling shared folder (original layout, other machines)
+# Candidate 2: 3-level wildcard (Google Drive, language-agnostic, 3 subdirs)
+$gdrive3 = Get-Item 'G:\*\*\*\investment-os-data' -ErrorAction SilentlyContinue |
+           Select-Object -First 1 -ExpandProperty FullName
+
+# Candidate 3: 2-level wildcard (older layout)
+$gdrive2 = Get-Item 'G:\*\*\investment-os-data' -ErrorAction SilentlyContinue |
+           Select-Object -First 1 -ExpandProperty FullName
+
+# Candidate 4: sibling shared folder (local fallback)
 $sibling = Join-Path $PSScriptRoot '..\shared\investment-os-data'
 
-$shared = @($gdrive, $sibling) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+$shared = @($exact, $gdrive3, $gdrive2, $sibling) |
+          Where-Object { $_ -and (Test-Path $_) } |
+          Select-Object -First 1
 
 if (-not $shared) {
     Write-Host '[ERROR] Data source not found. Tried:'
-    Write-Host '        G:\*\*\investment-os-data  (Google Drive, any language)'
+    Write-Host "        $exact"
+    Write-Host '        G:\*\*\*\investment-os-data'
+    Write-Host '        G:\*\*\investment-os-data'
     Write-Host "        $sibling"
     exit 1
 }

@@ -1,17 +1,26 @@
 #Requires -Version 5
 $ErrorActionPreference = 'Stop'
 
-# Same auto-detection as sync-data.ps1 — Google Drive first, sibling folder fallback
-$gdrive = Get-Item 'G:\*\*\investment-os-data' -ErrorAction SilentlyContinue |
-          Select-Object -First 1 -ExpandProperty FullName
+# Same auto-detection as sync-data.ps1 — exact path first, then wildcards, then sibling
+$exact = 'G:\คอมพิวเตอร์เครื่องอื่นๆ\คอมพิวเตอร์ของฉัน\Shared\investment-os-data'
+
+$gdrive3 = Get-Item 'G:\*\*\*\investment-os-data' -ErrorAction SilentlyContinue |
+           Select-Object -First 1 -ExpandProperty FullName
+
+$gdrive2 = Get-Item 'G:\*\*\investment-os-data' -ErrorAction SilentlyContinue |
+           Select-Object -First 1 -ExpandProperty FullName
 
 $sibling = Join-Path $PSScriptRoot '..\shared\investment-os-data'
 
-$shared = @($gdrive, $sibling) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+$shared = @($exact, $gdrive3, $gdrive2, $sibling) |
+          Where-Object { $_ -and (Test-Path $_) } |
+          Select-Object -First 1
 
 if (-not $shared) {
     Write-Host '[ERROR] Destination not found. Tried:'
-    Write-Host '        G:\*\*\investment-os-data  (Google Drive, any language)'
+    Write-Host "        $exact"
+    Write-Host '        G:\*\*\*\investment-os-data'
+    Write-Host '        G:\*\*\investment-os-data'
     Write-Host "        $sibling"
     exit 1
 }
