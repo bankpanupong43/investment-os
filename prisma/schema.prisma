@@ -1,0 +1,340 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Position ─────────────────────────────────────────────────────────────────
+
+model Position {
+  id         String   @id @default(cuid())
+  ticker     String
+  name       String   // full company name
+  sector     String?
+  industry   String?  // more granular than sector
+  assetClass String   @default("equity")
+  shares     Float
+  avgCost    Float
+  entryDate  DateTime
+  status     String   @default("active") // active | closed | trimmed
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  thesis           Thesis?
+  killConditions   KillCondition[]
+  journalEntries   JournalEntry[]
+  recommendations  Recommendation[]
+  newsItems        NewsItem[]
+  earningsEvents   EarningsEvent[]
+  thesisEvaluations ThesisEvaluation[]
+
+  @@map("positions")
+}
+
+// ─── Thesis ───────────────────────────────────────────────────────────────────
+
+model Thesis {
+  id         String @id @default(cuid())
+  positionId String @unique
+  version    Int    @default(1) // increments on each formal revision
+
+  // Core thesis text — immutable original, evolving assessment
+  originalThesis    String  // WHY you bought; never edited
+  currentAssessment String? // evolving view of thesis status
+
+  // Structured components stored as JSON arrays (see TypeScript types)
+  keyAssumptions   String @default("[]") // ThesisKeyAssumption[]
+  expectedOutcomes String @default("[]") // ExpectedOutcome[]
+  risks            String @default("[]") // ThesisRisk[]
+
+  // Time frame
+  holdingPeriod       String? // human-readable: "3-5 years"
+  holdingPeriodMonths Int?    // for calculations: 36-60
+
+  // Confidence at entry time (1-10) — set once, never changed
+  // Use ThesisEvaluation.overallScore for ongoing strength
+  entryConfidence Int @default(7)
+
+  // Current health (updated by agents)
+  healthStatus   String    @default("intact") // intact | weakening | broken | monitoring
+  healthScore    Int       @default(7)        // 0-10 current health, updated each evaluation
+  lastReviewedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  position    Position           @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  updates     ThesisUpdate[]     // incremental observations
+  versions    ThesisVersion[]    // full snapshots on formal revisions
+  evaluations ThesisEvaluation[] // AI scoring records
+
+  @@map("theses")
+}
+
+// ─── ThesisVersion ────────────────────────────────────────────────────────────
+// Full snapshot of thesis state at the time of each formal revision.
+// Version 1 = initial thesis at entry. Version 2+ = revised theses.
+// The original `originalThesis` on the Thesis model is immutable;
+// revisions live here as complete replacements of all structured components.
+
+model ThesisVersion {
+  id       String @id @default(cuid())
+  thesisId String
+  version  Int
+
+  // Complete thesis state at this version
+  thesisText       String
+  keyAssumptions   String @default("[]") // ThesisKeyAssumption[]
+  expectedOutcomes String @default("[]") // ExpectedOutcome[]
+  risks            String @default("[]") // ThesisRisk[]
+  holdingPeriod    String?
+  entryConfidence  Int
+
+  // Why was this revision made?
+  revisionReason String  // required — forces you to articulate why the thesis changed
+  revisedBy      String  @default("manual") // manual | ai
+
+  createdAt DateTime @default(now())
+
+  thesis Thesis @relation(fields: [thesisId], references: [id], onDelete: Cascade)
+
+  @@unique([thesisId, version])
+  @@map("thesis_versions")
+}
+
+// ─── ThesisUpdate ─────────────────────────────────────────────────────────────
+// Incremental observations — news, earnings, macro events that are
+// relevant but don't constitute a formal thesis revision.
+
+model ThesisUpdate {
+  id          String   @id @default(cuid())
+  thesisId    String
+  updateType  String   // confirmation | weakening | neutral | breaking
+  content     String
+  triggeredBy String?  // earnings | news | manual | macro | price_action
+  sourceUrl   String?
+  createdAt   DateTime @default(now())
+
+  thesis Thesis @relation(fields: [thesisId], references: [id], onDelete: Cascade)
+
+  @@map("thesis_updates")
+}
+
+// ─── ThesisEvaluation ─────────────────────────────────────────────────────────
+// AI scoring record. Created each time an agent evaluates the thesis.
+// Stores the full evidence-based assessment of each component.
+
+model ThesisEvaluation {
+  id         String @id @default(cuid())
+  thesisId   String
+  positionId String
+
+  // Component scores (0.0–10.0)
+  // Each is the average of individual item scores within that component.
+  assumptionsScore Float // how well key assumptions are holding
+  outcomesScore    Float // on track for expected outcomes
+  riskScore        Float // risks NOT materializing (10 = none materialized)
+  integrityScore   Float // AI judgment: is the core thesis still coherent?
+
+  // Weighted composite
+  // overallScore = assumptions×0.35 + outcomes×0.30 + risk×0.20 + integrity×0.15
+  overallScore Float
+
+  // Detailed per-item assessments (JSON arrays — see TypeScript types)
+  assumptionAssessments String // AssumptionAssessment[]
+  outcomeAssessments    String // OutcomeAssessment[]
+  riskAssessments       String // RiskAssessment[]
+
+  // Narrative
+  strengths            String  // what is confirmed and going well
+  concerns             String  // what is changing or at risk
+  scoreRationale       String  // brief explanation of overall score
+
+  // Recommendation output
+  recommendation       String  // hold | add | reduce | sell | watch
+  recommendationReason String
+  thesisReference      String  // quote from originalThesis that informs this recommendation
+
+  evaluatedBy String  @default("ai") // ai | manual
+  modelUsed   String? // which AI model, e.g. claude-opus-4-8
+  createdAt   DateTime @default(now())
+
+  thesis   Thesis   @relation(fields: [thesisId], references: [id], onDelete: Cascade)
+  position Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  @@map("thesis_evaluations")
+}
+
+// ─── KillCondition ────────────────────────────────────────────────────────────
+
+model KillCondition {
+  id            String    @id @default(cuid())
+  positionId    String
+  conditionType String    // quantitative | qualitative
+  description   String
+  metric        String?   // e.g. "azure_growth_rate", "market_share"
+  operator      String?   // lt | gt | eq | lte | gte | drops_below
+  threshold     Float?
+  status        String    @default("active") // active | triggered | dismissed
+  triggeredAt   DateTime?
+  triggeredNote String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  position        Position         @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  recommendations Recommendation[]
+
+  @@map("kill_conditions")
+}
+
+// ─── JournalEntry ─────────────────────────────────────────────────────────────
+
+model JournalEntry {
+  id         String   @id @default(cuid())
+  positionId String?
+  entryType  String   // buy_rationale | thesis_update | decision | observation | earnings_note | macro | evaluation
+  content    String
+  createdAt  DateTime @default(now())
+
+  position Position? @relation(fields: [positionId], references: [id], onDelete: SetNull)
+
+  @@map("journal_entries")
+}
+
+// ─── Recommendation ───────────────────────────────────────────────────────────
+
+model Recommendation {
+  id              String    @id @default(cuid())
+  positionId      String
+  action          String    // hold | add | reduce | sell | watch
+  reasoning       String
+  thesisReference String    // NON-NULLABLE: must quote the original thesis
+  killConditionId String?
+  evaluationId    String?   // link to the ThesisEvaluation that generated this
+  confidence      Int?      // 1-5
+  urgency         String    @default("low") // low | medium | high | critical
+  status          String    @default("pending") // pending | acknowledged | acted | dismissed
+  acknowledgedAt  DateTime?
+  createdAt       DateTime  @default(now())
+
+  position      Position       @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  killCondition KillCondition? @relation(fields: [killConditionId], references: [id])
+
+  @@map("recommendations")
+}
+
+// ─── NewsItem ─────────────────────────────────────────────────────────────────
+
+model NewsItem {
+  id                 String    @id @default(cuid())
+  positionId         String?
+  ticker             String
+  headline           String
+  content            String?
+  source             String?
+  url                String?
+  sentiment          String?   // positive | negative | neutral
+  thesisRelevance    String?   // high | medium | low | none
+  relevanceReasoning String?
+  publishedAt        DateTime?
+  fetchedAt          DateTime  @default(now())
+
+  position Position? @relation(fields: [positionId], references: [id], onDelete: SetNull)
+
+  @@map("news_items")
+}
+
+// ─── EarningsEvent ────────────────────────────────────────────────────────────
+
+model EarningsEvent {
+  id                    String    @id @default(cuid())
+  positionId            String?
+  ticker                String
+  fiscalPeriod          String?
+  reportDate            DateTime?
+  epsActual             Float?
+  epsEstimate           Float?
+  revenueActual         Float?
+  revenueEstimate       Float?
+  guidanceSummary       String?
+  thesisImpact          String?   // positive | negative | neutral | n/a
+  thesisAssumptionsHit  String?   // JSON: {assumption: string, result: "met"|"missed"|"n/a"}[]
+  killConditionsChecked String?   // JSON: {conditionId: string, triggered: boolean}[]
+  createdAt             DateTime  @default(now())
+
+  position Position? @relation(fields: [positionId], references: [id], onDelete: SetNull)
+
+  @@map("earnings_events")
+}
+
+// ─── Watchlist ────────────────────────────────────────────────────────────────
+
+model Watchlist {
+  id               String   @id @default(cuid())
+  ticker           String
+  name             String?
+  interestReason   String
+  draftThesis      String?
+  targetEntryPrice Float?
+  addedAt          DateTime @default(now())
+
+  @@map("watchlist")
+}
+
+// ─── TeamSession ──────────────────────────────────────────────────────────────
+// Coordinates one full multi-agent analysis cycle.
+// The Portfolio Manager orchestrates the session; each analyst posts a briefing;
+// the PM reads all briefings and produces the final synthesis + decisions.
+
+model TeamSession {
+  id          String    @id @default(cuid())
+  triggerType String    // morning_review | earnings_event | news_event | weekly_review | manual | idea_generation
+  triggerNote String?   // human-readable description of what prompted this session
+  tickers     String    @default("[]") // JSON: string[] of relevant tickers
+  status      String    @default("running") // running | complete | failed
+
+  // PM final output
+  finalSynthesis   String?  // JSON: PortfolioManagerDecision
+  decisionsCreated Int      @default(0)
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  briefings AgentBriefing[]
+
+  @@map("team_sessions")
+}
+
+// ─── AgentBriefing ────────────────────────────────────────────────────────────
+// One agent's structured report for a session.
+// Analysts write briefings; Portfolio Manager reads all of them.
+
+model AgentBriefing {
+  id        String   @id @default(cuid())
+  sessionId String
+  agentRole String   // portfolio_manager | thesis_analyst | news_analyst | earnings_analyst | risk_manager | idea_generator
+  ticker    String?  // populated when briefing is position-specific
+  report    String   // JSON typed report (see src/types/team.ts)
+  summary   String   // 2-3 sentence plaintext summary for quick scanning
+  createdAt DateTime @default(now())
+
+  session TeamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("agent_briefings")
+}
+
+// ─── Brief ────────────────────────────────────────────────────────────────────
+
+model Brief {
+  id          String    @id @default(cuid())
+  briefType   String    // morning | weekly
+  content     String    // markdown
+  deliveredAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@map("briefs")
+}
