@@ -10,19 +10,29 @@ datasource db {
 // ─── Position ─────────────────────────────────────────────────────────────────
 
 model Position {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   ticker     String
-  name       String   // full company name
+  name       String
   sector     String?
-  industry   String?  // more granular than sector
-  assetClass String   @default("equity")
-  shares     Float
-  avgCost    Float
-  entryDate  DateTime
-  status     String   @default("active") // active | closed | trimmed
+  industry   String?
+  assetClass String    @default("equity")
+  shares     Float?
+  avgCost    Float?
+  entryDate  DateTime?
+  status     String    @default("active") // active | closed | trimmed
   notes      String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  // Snapshot fields — populated from portfolio tracking tools when share count / avg cost is unavailable
+  currentValueUsd     Float?
+  currentValueThb     Float?
+  allocationPct       Float?   // % of total portfolio at snapshot date
+  unrealizedReturnPct Float?   // unrealized gain/loss %
+  costBasisUsd        Float?   // derived: currentValueUsd / (1 + unrealizedReturnPct)
+  dataSource          String?  // origin of this data (e.g. "หุ้น.xlsx", "Dime app")
+  confidence          String?  // high | medium | low
+  snapshotDate        DateTime?
 
   thesis           Thesis?
   killConditions   KillCondition[]
