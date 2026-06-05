@@ -87,19 +87,35 @@ function Skeleton({ className = "" }: { className?: string }) {
   return <div className={`bg-[#EEEEEE] rounded-xl animate-pulse ${className}`} />;
 }
 
+interface InvestmentThesisItem {
+  id: string;
+  ticker: string;
+  title: string;
+  confidenceScore: number;
+  status: string;
+  isDraft: boolean;
+  isReviewDue: boolean;
+  daysOverdue: number | null;
+  lastReviewedAt: string | null;
+  reviewFrequency: string;
+}
+
 export default function DashboardPage() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [journal, setJournal] = useState<JournalEntry[]>([]);
+  const [theses, setTheses] = useState<InvestmentThesisItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
       fetch("/api/positions").then(r => r.json()),
       fetch("/api/journal?limit=6").then(r => r.json()),
+      fetch("/api/investment-theses").then(r => r.json()),
     ])
-      .then(([pos, jrn]) => {
+      .then(([pos, jrn, thy]) => {
         setPositions(Array.isArray(pos) ? pos : []);
         setJournal(Array.isArray(jrn) ? jrn : []);
+        setTheses(Array.isArray(thy?.theses) ? thy.theses : []);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -119,6 +135,11 @@ export default function DashboardPage() {
   }, {} as Record<string, number>);
 
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+
+  const thesesOverdue  = theses.filter(t => t.isReviewDue);
+  const thesesWeakest  = [...theses].sort((a, b) => a.confidenceScore - b.confidenceScore).slice(0, 3);
+  const thesesStrongest = [...theses].sort((a, b) => b.confidenceScore - a.confidenceScore).slice(0, 3);
+  const thesisScoreColor = (n: number) => n >= 8 ? "text-[#2d7d46]" : n >= 6 ? "text-[#b45309]" : "text-[#c0392b]";
 
   if (loading) {
     return (
@@ -178,6 +199,77 @@ export default function DashboardPage() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Thesis Coverage Widgets */}
+      {theses.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Reviews Due */}
+          <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-[#EEEEEE] flex items-center justify-between">
+              <h2 className="font-medium text-[#171A20] text-sm">Reviews Due</h2>
+              <span className={`text-xs font-medium tabular-nums px-2 py-0.5 rounded ${thesesOverdue.length > 0 ? "text-[#c0392b] bg-[#fdf0ee]" : "text-[#2d7d46] bg-[#eef7f1]"}`}>
+                {thesesOverdue.length}
+              </span>
+            </div>
+            {thesesOverdue.length === 0 ? (
+              <div className="px-5 py-5 text-xs text-[#8E8E8E] text-center">All theses up to date</div>
+            ) : (
+              thesesOverdue.slice(0, 4).map((t, i) => (
+                <Link key={t.id} href={`/theses/${t.ticker}`} className={`flex items-center gap-3 px-5 py-3 hover:bg-[#F4F4F4] transition-colors ${i < Math.min(thesesOverdue.length, 4) - 1 ? "border-b border-[#EEEEEE]" : ""}`}>
+                  <span className="font-medium text-[#171A20] text-sm w-12 shrink-0">{t.ticker}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-[#c0392b] font-medium">
+                      {t.daysOverdue != null ? `${t.daysOverdue}d overdue` : "Never reviewed"}
+                    </div>
+                    <div className="text-xs text-[#8E8E8E] capitalize">{t.reviewFrequency}</div>
+                  </div>
+                </Link>
+              ))
+            )}
+            {thesesOverdue.length > 4 && (
+              <Link href="/theses" className="block px-5 py-2.5 text-xs text-[#3E6AE1] border-t border-[#EEEEEE] hover:bg-[#F4F4F4] transition-colors">
+                +{thesesOverdue.length - 4} more →
+              </Link>
+            )}
+          </div>
+
+          {/* Weakest Conviction */}
+          <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-[#EEEEEE] flex items-center justify-between">
+              <h2 className="font-medium text-[#171A20] text-sm">Weakest Conviction</h2>
+              <Link href="/theses" className="text-xs text-[#3E6AE1] hover:text-[#2d5bc7] transition-colors">All →</Link>
+            </div>
+            {thesesWeakest.map((t, i) => (
+              <Link key={t.id} href={`/theses/${t.ticker}`} className={`flex items-center gap-3 px-5 py-3 hover:bg-[#F4F4F4] transition-colors ${i < thesesWeakest.length - 1 ? "border-b border-[#EEEEEE]" : ""}`}>
+                <span className="font-medium text-[#171A20] text-sm w-12 shrink-0">{t.ticker}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-[#8E8E8E] truncate">{t.title}</div>
+                  <div className="text-xs text-[#8E8E8E] capitalize mt-0.5">{t.status}</div>
+                </div>
+                <span className={`text-sm font-medium tabular-nums shrink-0 ${thesisScoreColor(t.confidenceScore)}`}>{t.confidenceScore}</span>
+              </Link>
+            ))}
+          </div>
+
+          {/* Highest Conviction */}
+          <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-[#EEEEEE] flex items-center justify-between">
+              <h2 className="font-medium text-[#171A20] text-sm">Highest Conviction</h2>
+              <Link href="/theses" className="text-xs text-[#3E6AE1] hover:text-[#2d5bc7] transition-colors">All →</Link>
+            </div>
+            {thesesStrongest.map((t, i) => (
+              <Link key={t.id} href={`/theses/${t.ticker}`} className={`flex items-center gap-3 px-5 py-3 hover:bg-[#F4F4F4] transition-colors ${i < thesesStrongest.length - 1 ? "border-b border-[#EEEEEE]" : ""}`}>
+                <span className="font-medium text-[#171A20] text-sm w-12 shrink-0">{t.ticker}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-[#8E8E8E] truncate">{t.title}</div>
+                  <div className="text-xs text-[#8E8E8E] capitalize mt-0.5">{t.status}</div>
+                </div>
+                <span className={`text-sm font-medium tabular-nums shrink-0 ${thesisScoreColor(t.confidenceScore)}`}>{t.confidenceScore}</span>
+              </Link>
+            ))}
           </div>
         </div>
       )}

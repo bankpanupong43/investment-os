@@ -383,3 +383,46 @@ model Brief {
 
   @@map("briefs")
 }
+
+// ─── InvestmentThesis ─────────────────────────────────────────────────────────
+// Human-authored decision-support record — one per ticker (position or watchlist).
+// Separate from the agent-facing Thesis model (which is position-linked & AI-driven).
+
+model InvestmentThesis {
+  id              String    @id @default(cuid())
+  ticker          String    @unique
+  title           String
+  thesis          String    // Core investment thesis — why you own or want to own this
+  whyOwn          String    // One-paragraph ownership rationale
+  risks           String    // Key risks in plain text
+  killCriteria    String    // Concrete conditions that would cause an exit
+  confidenceScore Int       @default(7)          // 1–10; 10 = highest conviction
+  reviewFrequency String    @default("quarterly") // monthly | quarterly | annually
+  lastReviewedAt  DateTime?
+  status          String    @default("active")   // active | watchlist | closed
+  isDraft         Boolean   @default(true)        // true = AI-generated draft, needs human review
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  reviews ThesisReview[]
+
+  @@map("investment_theses")
+}
+
+// ─── ThesisReview ─────────────────────────────────────────────────────────────
+// Audit log of each time a thesis is reviewed or confidence is updated.
+
+model ThesisReview {
+  id                 String   @id @default(cuid())
+  thesisId           String
+  reviewType         String   // review_completed | confidence_changed
+  previousConfidence Int?
+  newConfidence      Int?
+  notes              String?
+  reviewedAt         DateTime @default(now())
+
+  thesis InvestmentThesis @relation(fields: [thesisId], references: [id], onDelete: Cascade)
+
+  @@map("thesis_reviews")
+}
