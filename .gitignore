@@ -40,3 +40,6 @@ prisma/*.db-journal
 
 # npm cache (local)
 npm-cache
+
+# database backups
+backups/*.db
