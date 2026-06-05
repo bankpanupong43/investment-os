@@ -10,13 +10,21 @@ interface Position {
   sector: string | null;
   industry: string | null;
   assetClass: string;
-  shares: number;
-  avgCost: number;
-  entryDate: string;
+  shares: number | null;
+  avgCost: number | null;
+  entryDate: string | null;
   status: string;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+  currentValueUsd: number | null;
+  currentValueThb: number | null;
+  allocationPct: number | null;
+  unrealizedReturnPct: number | null;
+  costBasisUsd: number | null;
+  dataSource: string | null;
+  confidence: string | null;
+  snapshotDate: string | null;
   thesis: {
     id: string;
     version: number;
@@ -136,12 +144,19 @@ const IMPACT_COLOR: Record<string, string> = {
   "n/a": "text-[#D0D1D2]",
 };
 
-function fmt(n: number) {
+function fmt(n: number | null | undefined): string {
+  if (n == null) return "—";
   return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function fmtDate(d: string) {
+function fmtDate(d: string | null | undefined): string {
+  if (!d) return "—";
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function fmtPct(n: number | null | undefined): string {
+  if (n == null) return "—";
+  return (n > 0 ? "+" : "") + n.toFixed(2) + "%";
 }
 
 function safeJson<T>(str: string, fallback: T): T {
@@ -194,7 +209,8 @@ export default function PositionDetailPage() {
     );
   }
 
-  const costBasis = position.shares * position.avgCost;
+  const costBasis = position.costBasisUsd
+    ?? (position.shares != null && position.avgCost != null ? position.shares * position.avgCost : null);
   const thesis = position.thesis;
   const assumptions = thesis ? safeJson<unknown[]>(thesis.keyAssumptions, []) : [];
   const outcomes = thesis ? safeJson<unknown[]>(thesis.expectedOutcomes, []) : [];
@@ -241,19 +257,49 @@ export default function PositionDetailPage() {
             )}
           </div>
           <div className="text-right">
-            <div className="text-xs text-[#8E8E8E] mb-1">Cost Basis</div>
-            <div className="text-2xl font-medium text-[#171A20] tabular-nums">{fmt(costBasis)}</div>
+            <div className="text-xs text-[#8E8E8E] mb-1">
+              {position.currentValueUsd != null ? "Current Value" : "Cost Basis"}
+            </div>
+            <div className="text-2xl font-medium text-[#171A20] tabular-nums">
+              {position.currentValueUsd != null ? fmt(position.currentValueUsd) : fmt(costBasis)}
+            </div>
             <div className="text-xs text-[#8E8E8E] mt-1">
-              {position.shares.toLocaleString()} shares @ {fmt(position.avgCost)}
+              {position.shares != null && position.avgCost != null
+                ? <>{position.shares.toLocaleString()} shares @ {fmt(position.avgCost)}</>
+                : position.unrealizedReturnPct != null
+                  ? <span className={position.unrealizedReturnPct >= 0 ? "text-[#2d7d46]" : "text-[#c0392b]"}>
+                      {fmtPct(position.unrealizedReturnPct)} unrealized
+                    </span>
+                  : <span className="text-[#D0D1D2]">No share data</span>
+              }
             </div>
           </div>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5 pt-5 border-t border-[#EEEEEE]">
-          <div>
-            <div className="text-xs text-[#8E8E8E] mb-0.5">Entry Date</div>
-            <div className="text-sm font-medium text-[#393C41]">{fmtDate(position.entryDate)}</div>
-          </div>
+          {position.entryDate ? (
+            <div>
+              <div className="text-xs text-[#8E8E8E] mb-0.5">Entry Date</div>
+              <div className="text-sm font-medium text-[#393C41]">{fmtDate(position.entryDate)}</div>
+            </div>
+          ) : position.snapshotDate ? (
+            <div>
+              <div className="text-xs text-[#8E8E8E] mb-0.5">Snapshot Date</div>
+              <div className="text-sm font-medium text-[#393C41]">{fmtDate(position.snapshotDate)}</div>
+            </div>
+          ) : null}
+          {position.allocationPct != null && (
+            <div>
+              <div className="text-xs text-[#8E8E8E] mb-0.5">Portfolio Weight</div>
+              <div className="text-sm font-medium text-[#393C41]">{position.allocationPct.toFixed(2)}%</div>
+            </div>
+          )}
+          {position.costBasisUsd != null && (
+            <div>
+              <div className="text-xs text-[#8E8E8E] mb-0.5">Cost Basis (derived)</div>
+              <div className="text-sm font-medium text-[#393C41]">{fmt(position.costBasisUsd)}</div>
+            </div>
+          )}
           {thesis?.holdingPeriod && (
             <div>
               <div className="text-xs text-[#8E8E8E] mb-0.5">Holding Period</div>
@@ -270,6 +316,15 @@ export default function PositionDetailPage() {
             <div>
               <div className="text-xs text-[#8E8E8E] mb-0.5">Last Reviewed</div>
               <div className="text-sm font-medium text-[#393C41]">{fmtDate(thesis.lastReviewedAt)}</div>
+            </div>
+          )}
+          {position.dataSource && (
+            <div>
+              <div className="text-xs text-[#8E8E8E] mb-0.5">Data Source</div>
+              <div className="text-sm text-[#8E8E8E] truncate" title={position.dataSource}>
+                {position.dataSource.split("+")[0].trim()}
+                {position.confidence && <span className="ml-1 text-xs">· {position.confidence}</span>}
+              </div>
             </div>
           )}
         </div>

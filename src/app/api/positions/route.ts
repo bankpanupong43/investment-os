@@ -11,7 +11,7 @@ export async function GET() {
       killConditions: { where: { status: "active" } },
       recommendations: { where: { status: "pending" }, orderBy: { createdAt: "desc" }, take: 1 },
     },
-    orderBy: { entryDate: "asc" },
+    orderBy: { ticker: "asc" },
   });
   return NextResponse.json(positions);
 }

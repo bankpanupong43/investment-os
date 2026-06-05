@@ -8,10 +8,15 @@ interface Position {
   name: string;
   sector: string | null;
   assetClass: string;
-  shares: number;
-  avgCost: number;
-  entryDate: string;
+  shares: number | null;
+  avgCost: number | null;
+  entryDate: string | null;
   status: string;
+  currentValueUsd: number | null;
+  currentValueThb: number | null;
+  allocationPct: number | null;
+  unrealizedReturnPct: number | null;
+  costBasisUsd: number | null;
   thesis: {
     healthStatus: string | null;
     healthScore: number | null;
@@ -52,12 +57,20 @@ const URGENCY_COLOR: Record<string, string> = {
   critical: "text-[#c0392b]",
 };
 
-function fmt(n: number) {
+function fmt(n: number | null | undefined): string {
+  if (n == null) return "—";
   return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function fmtDate(d: string) {
+function fmtDate(d: string | null | undefined): string {
+  if (!d) return "—";
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function positionCostBasis(p: Pick<Position, "costBasisUsd" | "shares" | "avgCost">): number | null {
+  if (p.costBasisUsd != null) return p.costBasisUsd;
+  if (p.shares != null && p.avgCost != null) return p.shares * p.avgCost;
+  return null;
 }
 
 function MetricCard({ label, value, sub, highlight = false }: { label: string; value: string; sub: string; highlight?: boolean }) {
@@ -91,7 +104,7 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const totalInvested = positions.reduce((s, p) => s + p.shares * p.avgCost, 0);
+  const totalInvested = positions.reduce((s, p) => s + (positionCostBasis(p) ?? 0), 0);
   const avgConfidence = positions.length
     ? positions.reduce((s, p) => s + (p.thesis?.entryConfidence ?? 0), 0) / positions.length
     : 0;
@@ -215,9 +228,11 @@ export default function DashboardPage() {
                           <div className="text-xs text-[#8E8E8E] truncate max-w-[160px]">{p.name}</div>
                         </Link>
                       </td>
-                      <td className="px-5 py-3.5 text-right tabular-nums text-[#393C41]">{p.shares.toLocaleString()}</td>
+                      <td className="px-5 py-3.5 text-right tabular-nums text-[#393C41]">
+                        {p.shares != null ? p.shares.toLocaleString() : <span className="text-[#D0D1D2]">—</span>}
+                      </td>
                       <td className="px-5 py-3.5 text-right tabular-nums text-[#393C41]">{fmt(p.avgCost)}</td>
-                      <td className="px-5 py-3.5 text-right tabular-nums font-medium text-[#171A20]">{fmt(p.shares * p.avgCost)}</td>
+                      <td className="px-5 py-3.5 text-right tabular-nums font-medium text-[#171A20]">{fmt(positionCostBasis(p))}</td>
                       <td className="px-5 py-3.5">
                         {p.thesis?.healthStatus ? (
                           <span className={`text-xs px-2 py-0.5 rounded border capitalize ${HEALTH_STYLE[p.thesis.healthStatus] ?? "text-[#5C5E62] bg-[#F4F4F4] border-[#EEEEEE]"}`}>

@@ -9,11 +9,16 @@ interface Position {
   sector: string | null;
   industry: string | null;
   assetClass: string;
-  shares: number;
-  avgCost: number;
-  entryDate: string;
+  shares: number | null;
+  avgCost: number | null;
+  entryDate: string | null;
   status: string;
   notes: string | null;
+  currentValueUsd: number | null;
+  currentValueThb: number | null;
+  allocationPct: number | null;
+  unrealizedReturnPct: number | null;
+  costBasisUsd: number | null;
   thesis: {
     healthStatus: string | null;
     healthScore: number | null;
@@ -37,18 +42,27 @@ const STATUS_STYLE: Record<string, string> = {
   trimmed: "text-[#b45309] bg-[#fffbeb] border-[#fde68a]",
 };
 
-function fmt(n: number) {
+function fmt(n: number | null | undefined): string {
+  if (n == null) return "—";
   return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function fmtShort(n: number) {
+function fmtShort(n: number | null | undefined): string {
+  if (n == null) return "—";
   if (n >= 1_000_000) return "$" + (n / 1_000_000).toFixed(2) + "M";
   if (n >= 1_000) return "$" + (n / 1_000).toFixed(1) + "K";
   return fmt(n);
 }
 
-function fmtDate(d: string) {
+function fmtDate(d: string | null | undefined): string {
+  if (!d) return "—";
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
+}
+
+function positionCostBasis(p: Pick<Position, "costBasisUsd" | "shares" | "avgCost">): number | null {
+  if (p.costBasisUsd != null) return p.costBasisUsd;
+  if (p.shares != null && p.avgCost != null) return p.shares * p.avgCost;
+  return null;
 }
 
 const SELECT_CLS = "bg-white border border-[#EEEEEE] text-[#393C41] text-sm rounded px-3 py-1.5 focus:outline-none focus:border-[#3E6AE1]";
@@ -75,8 +89,8 @@ export default function HoldingsPage() {
     .filter(p => assetFilter === "all" || p.assetClass === assetFilter)
     .sort((a, b) => {
       if (sortBy === "ticker") return a.ticker.localeCompare(b.ticker);
-      if (sortBy === "costBasis") return b.shares * b.avgCost - a.shares * a.avgCost;
-      if (sortBy === "entryDate") return new Date(b.entryDate).getTime() - new Date(a.entryDate).getTime();
+      if (sortBy === "costBasis") return (positionCostBasis(b) ?? 0) - (positionCostBasis(a) ?? 0);
+      if (sortBy === "entryDate") return (b.entryDate ? new Date(b.entryDate).getTime() : 0) - (a.entryDate ? new Date(a.entryDate).getTime() : 0);
       if (sortBy === "health") {
         const order: Record<string, number> = { intact: 0, monitoring: 1, weakening: 2, broken: 3 };
         return (order[a.thesis?.healthStatus ?? ""] ?? 4) - (order[b.thesis?.healthStatus ?? ""] ?? 4);
@@ -84,8 +98,8 @@ export default function HoldingsPage() {
       return 0;
     });
 
-  const totalInvested = filtered.reduce((s, p) => s + p.shares * p.avgCost, 0);
-  const largestPosition = filtered.reduce((max, p) => Math.max(max, p.shares * p.avgCost), 0);
+  const totalInvested = filtered.reduce((s, p) => s + (positionCostBasis(p) ?? 0), 0);
+  const largestPosition = filtered.reduce((max, p) => Math.max(max, positionCostBasis(p) ?? 0), 0);
 
   if (loading) {
     return (
@@ -164,9 +178,9 @@ export default function HoldingsPage() {
                 </tr>
               ) : (
                 filtered.map((p, idx) => {
-                  const costBasis = p.shares * p.avgCost;
-                  const weight = totalInvested > 0 ? costBasis / totalInvested : 0;
-                  const barWidth = largestPosition > 0 ? (costBasis / largestPosition) * 100 : 0;
+                  const costBasis = positionCostBasis(p);
+                  const weight = totalInvested > 0 && costBasis != null ? costBasis / totalInvested : null;
+                  const barWidth = largestPosition > 0 && costBasis != null ? (costBasis / largestPosition) * 100 : 0;
                   const triggeredKills = p.killConditions.filter(k => k.status === "triggered").length;
                   return (
                     <tr
@@ -186,7 +200,9 @@ export default function HoldingsPage() {
                       <td className="px-5 py-3.5 hidden md:table-cell">
                         <span className="text-xs text-[#8E8E8E] capitalize">{p.assetClass}</span>
                       </td>
-                      <td className="px-5 py-3.5 text-right tabular-nums text-[#393C41]">{p.shares.toLocaleString()}</td>
+                      <td className="px-5 py-3.5 text-right tabular-nums text-[#393C41]">
+                        {p.shares != null ? p.shares.toLocaleString() : <span className="text-[#D0D1D2]">—</span>}
+                      </td>
                       <td className="px-5 py-3.5 text-right tabular-nums text-[#393C41]">{fmt(p.avgCost)}</td>
                       <td className="px-5 py-3.5 text-right">
                         <div className="tabular-nums font-medium text-[#171A20]">{fmtShort(costBasis)}</div>
@@ -195,7 +211,7 @@ export default function HoldingsPage() {
                         </div>
                       </td>
                       <td className="px-5 py-3.5 text-right tabular-nums text-[#8E8E8E] text-xs hidden md:table-cell">
-                        {(weight * 100).toFixed(1)}%
+                        {weight != null ? `${(weight * 100).toFixed(1)}%` : <span className="text-[#D0D1D2]">—</span>}
                       </td>
                       <td className="px-5 py-3.5 hidden sm:table-cell">
                         <span className="text-xs text-[#8E8E8E]">{fmtDate(p.entryDate)}</span>
