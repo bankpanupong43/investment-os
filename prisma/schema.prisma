@@ -372,6 +372,33 @@ model AllocationTarget {
   @@map("allocation_targets")
 }
 
+// ─── PortfolioReview ──────────────────────────────────────────────────────────
+// Snapshot of a full portfolio review at a point in time.
+// All section and card fields are JSON strings (SQLite has no native JSON type).
+
+model PortfolioReview {
+  id          String   @id @default(cuid())
+  generatedAt DateTime @default(now())
+  notes       String?
+
+  // Section analysis — JSON strings
+  portfolioSummary          String  // JSON: PortfolioSummary
+  allocationAnalysis        String  // JSON: AllocationAnalysis
+  thesisCoverageAnalysis    String  // JSON: ThesisCoverageAnalysis
+  riskAnalysis              String  // JSON: RiskAnalysis
+  cashAllocationReview      String  // JSON: CashAllocationReview
+  watchlistPrioritization   String  // JSON: WatchlistPrioritization
+
+  // AI review cards — JSON strings
+  biggestRisk        String  // JSON: ReviewCard
+  biggestOpportunity String  // JSON: ReviewCard
+  mostUnderallocated String  // JSON: ReviewCard
+  weakestThesis      String  // JSON: ReviewCard
+  reviewsDue         String  // JSON: ReviewCard[]
+
+  @@map("portfolio_reviews")
+}
+
 // ─── Brief ────────────────────────────────────────────────────────────────────
 
 model Brief {
