@@ -611,6 +611,22 @@ model IngestionLog {
   @@map("ingestion_logs")
 }
 
+// ─── Backup ───────────────────────────────────────────────────────────────────
+// Audit record for every backup operation.
+
+model Backup {
+  id         String   @id @default(cuid())
+  backupType String   // database | brain_os_export | full_snapshot
+  filePath   String   // path relative to project root
+  fileSize   Int      // bytes
+  checksum   String   // SHA256
+  metadata   String   @default("{}") // JSON: label, restore info, etc.
+  createdAt  DateTime @default(now())
+
+  @@index([backupType])
+  @@map("backups")
+}
+
 // ─── Brief ────────────────────────────────────────────────────────────────────
 
 model Brief {

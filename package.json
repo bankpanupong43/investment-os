@@ -23,7 +23,11 @@
     "validate:opportunities": "tsx scripts/validate-opportunities.ts",
     "validate:research": "tsx scripts/validate-research.ts",
     "validate:evidence": "tsx scripts/validate-evidence.ts",
-    "validate:sec-earnings": "tsx scripts/validate-sec-earnings.ts"
+    "validate:sec-earnings": "tsx scripts/validate-sec-earnings.ts",
+    "backup": "tsx scripts/run-backup.ts",
+    "integrity": "tsx scripts/run-integrity.ts",
+    "restore": "tsx scripts/run-restore.ts",
+    "validate:backup": "tsx scripts/validate-backup.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

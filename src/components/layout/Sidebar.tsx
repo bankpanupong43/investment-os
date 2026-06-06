@@ -139,6 +139,15 @@ const NAV = [
       </svg>
     ),
   },
+  {
+    href: "/system",
+    label: "System",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8m-4-4v4" />
+      </svg>
+    ),
+  },
 ];
 
 export function Sidebar() {
