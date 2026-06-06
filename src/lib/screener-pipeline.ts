@@ -70,9 +70,11 @@ export interface ScreenerResult {
 
 export function applyFilters(entries: ScoredEntry[], filters: ScreenerFilters): ScoredEntry[] {
   const f = { ...DEFAULT_FILTERS, ...filters };
+  // Spreading filters with tiers:undefined overrides the default [] — guard explicitly
+  const tiers = f.tiers ?? [];
 
   return entries.filter(e => {
-    if (f.tiers.length > 0 && !f.tiers.includes(e.universeTier)) return false;
+    if (tiers.length > 0 && !tiers.includes(e.universeTier)) return false;
 
     const fund = e.fundamentals;
     if (!fund) {
