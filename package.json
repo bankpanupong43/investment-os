@@ -27,7 +27,8 @@
     "backup": "tsx scripts/run-backup.ts",
     "integrity": "tsx scripts/run-integrity.ts",
     "restore": "tsx scripts/run-restore.ts",
-    "validate:backup": "tsx scripts/validate-backup.ts"
+    "validate:backup": "tsx scripts/validate-backup.ts",
+    "validate:automation": "tsx scripts/validate-automation.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

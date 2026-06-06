@@ -156,7 +156,7 @@ function contextNote(ctx: BrainOSContext, section: string): string {
   return ` ${influence.insight}`;
 }
 
-async function generateReview(notes: string | null): Promise<PortfolioReviewRecord> {
+export async function generateReview(notes: string | null): Promise<PortfolioReviewRecord> {
   const ctx = loadBrainContext();
 
   const [positions, theses, allocationTargets, settings, watchlistItems] = await Promise.all([

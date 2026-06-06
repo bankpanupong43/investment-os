@@ -627,6 +627,25 @@ model Backup {
   @@map("backups")
 }
 
+// ─── Job ──────────────────────────────────────────────────────────────────────
+// Audit record for every scheduled or manually triggered automation job.
+
+model Job {
+  id            String    @id @default(cuid())
+  jobName       String    // backup | integrity_check | sec_filing_refresh | etc.
+  status        String    @default("pending") // pending | running | completed | failed | skipped
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+  durationMs    Int?
+  resultSummary String?   // human-readable one-line result
+  errorMessage  String?
+
+  @@index([jobName])
+  @@index([status])
+  @@index([startedAt])
+  @@map("jobs")
+}
+
 // ─── Brief ────────────────────────────────────────────────────────────────────
 
 model Brief {
