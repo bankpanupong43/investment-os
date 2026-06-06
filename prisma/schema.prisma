@@ -264,13 +264,18 @@ model EarningsEvent {
   id                    String    @id @default(cuid())
   positionId            String?
   ticker                String
-  fiscalPeriod          String?
+  fiscalQuarter         Int?      // 1–4
+  fiscalYear            Int?      // e.g. 2024
+  fiscalPeriod          String?   // human-readable: "Q1 2024"
   reportDate            DateTime?
   epsActual             Float?
   epsEstimate           Float?
   revenueActual         Float?
   revenueEstimate       Float?
   guidanceSummary       String?
+  transcript            String?   // full call transcript (if available)
+  managementCommentary  String?   // extracted key management commentary
+  keyMetrics            String?   // JSON: Record<string, string | number>
   thesisImpact          String?   // positive | negative | neutral | n/a
   thesisAssumptionsHit  String?   // JSON: {assumption: string, result: "met"|"missed"|"n/a"}[]
   killConditionsChecked String?   // JSON: {conditionId: string, triggered: boolean}[]
@@ -279,6 +284,48 @@ model EarningsEvent {
   position Position? @relation(fields: [positionId], references: [id], onDelete: SetNull)
 
   @@map("earnings_events")
+}
+
+// ─── Filing ───────────────────────────────────────────────────────────────────
+// SEC EDGAR filings — 10-K, 10-Q, 8-K, 20-F
+
+model Filing {
+  id              String    @id @default(cuid())
+  ticker          String
+  filingType      String    // 10-K | 10-Q | 8-K | 20-F
+  accessionNumber String    @unique
+  filingDate      DateTime
+  periodEndDate   DateTime?
+  title           String    @default("")
+  summary         String?   // AI-generated summary
+  rawContent      String?   // full extracted text
+  sourceUrl       String?
+  createdAt       DateTime  @default(now())
+
+  thesisImpacts ThesisImpactRecord[]
+
+  @@index([ticker])
+  @@index([ticker, filingType])
+  @@map("filings")
+}
+
+// ─── ThesisImpactRecord ────────────────────────────────────────────────────────
+// Thesis impact evaluation result for a specific filing.
+
+model ThesisImpactRecord {
+  id             String   @id @default(cuid())
+  filingId       String
+  ticker         String
+  impactLevel    String   // intact | strengthened | weakened | kill_criteria_triggered
+  impactedThesis String   // which thesis / thesis aspect is impacted
+  reasoning      String   // why this impact was assessed
+  evidenceIds    String   @default("[]") // JSON: string[] — references to fact IDs or filing excerpts
+  createdAt      DateTime @default(now())
+
+  filing Filing @relation(fields: [filingId], references: [id], onDelete: Cascade)
+
+  @@index([ticker])
+  @@map("thesis_impact_records")
 }
 
 // ─── Watchlist ────────────────────────────────────────────────────────────────
@@ -395,6 +442,11 @@ model PortfolioReview {
   mostUnderallocated String  // JSON: ReviewCard
   weakestThesis      String  // JSON: ReviewCard
   reviewsDue         String  // JSON: ReviewCard[]
+
+  // Filing intelligence cards (Phase 5E)
+  filingsRequiringReview String  @default("[]") // JSON: ReviewCard[]
+  thesisAlerts           String  @default("[]") // JSON: ReviewCard[]
+  newRisksDetected       String  @default("[]") // JSON: ReviewCard[]
 
   // Brain OS context that was active when this review was generated
   brainContextReport String? // JSON: BrainOSContext | null

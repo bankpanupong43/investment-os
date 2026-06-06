@@ -131,6 +131,7 @@ function parseReview(r: {
   biggestRisk: string; biggestOpportunity: string;
   mostUnderallocated: string; weakestThesis: string; reviewsDue: string;
   brainContextReport: string | null;
+  [key: string]: unknown;
 }) {
   return {
     id: r.id,
@@ -402,11 +403,118 @@ ${sections}
 
 // ─── Index markdown ────────────────────────────────────────────────────────────
 
+// ─── Filing markdown ───────────────────────────────────────────────────────────
+
+function renderFiling(f: {
+  id: string; ticker: string; filingType: string; accessionNumber: string;
+  filingDate: Date; periodEndDate: Date | null; title: string;
+  summary: string | null; sourceUrl: string | null;
+  thesisImpacts: Array<{ impactLevel: string; reasoning: string; createdAt: Date }>;
+}): string {
+  const date = isoDate(f.filingDate);
+  const period = f.periodEndDate ? isoDate(f.periodEndDate) : "—";
+  const impact = f.thesisImpacts[0];
+
+  const impactSection = impact
+    ? `## Thesis Impact\n\n**Level:** \`${impact.impactLevel}\`\n\n${impact.reasoning}\n`
+    : "";
+
+  const summarySection = f.summary ? `## Summary\n\n${f.summary}\n` : "";
+
+  const sourceLink = f.sourceUrl ? `[View on SEC EDGAR](${f.sourceUrl})` : "";
+
+  return `---
+title: "${f.ticker} ${f.filingType} — ${date}"
+ticker: ${f.ticker}
+filingType: ${f.filingType}
+filingDate: ${date}
+periodEndDate: ${period}
+accessionNumber: ${f.accessionNumber}
+tags: [investment-os, filing, ${f.filingType.toLowerCase().replace('-', '')}]
+exportedAt: ${EXPORTED_AT}
+source: investment-os
+---
+
+# ${f.ticker} ${f.filingType} — ${date}
+
+> [[Investment OS/_Index|← Investment OS Index]] | [[Investment OS/Theses/${f.ticker}|${f.ticker} Thesis]]
+
+**Filing:** ${f.title}
+**Period End:** ${period}
+**Accession:** ${f.accessionNumber}
+${sourceLink ? `**Source:** ${sourceLink}` : ""}
+
+---
+
+${summarySection}
+${impactSection}
+---
+
+*Exported from Investment OS · ${EXPORTED_DATE}*
+`;
+}
+
+// ─── Earnings markdown ─────────────────────────────────────────────────────────
+
+function renderEarningsFile(
+  ticker: string,
+  events: Array<{
+    fiscalPeriod: string | null; fiscalQuarter: number | null; fiscalYear: number | null;
+    reportDate: Date | null; epsActual: number | null; epsEstimate: number | null;
+    revenueActual: number | null; revenueEstimate: number | null;
+    guidanceSummary: string | null; managementCommentary: string | null;
+    thesisImpact: string | null; createdAt: Date;
+  }>
+): string {
+  const rows = events.map(e => {
+    const period = e.fiscalPeriod ?? `Q${e.fiscalQuarter} ${e.fiscalYear}`;
+    const epsBeat = e.epsActual != null && e.epsEstimate != null
+      ? (e.epsActual > e.epsEstimate ? "✅ Beat" : "❌ Miss") : "—";
+    const revBeat = e.revenueActual != null && e.revenueEstimate != null
+      ? (e.revenueActual > e.revenueEstimate ? "✅ Beat" : "❌ Miss") : "—";
+    return `| ${period} | ${e.epsActual ?? "—"} | ${e.epsEstimate ?? "—"} | ${epsBeat} | ${e.revenueActual ? `$${e.revenueActual.toLocaleString()}M` : "—"} | ${revBeat} | ${e.thesisImpact ?? "—"} |`;
+  }).join("\n");
+
+  const details = events.map(e => {
+    const period = e.fiscalPeriod ?? `Q${e.fiscalQuarter} ${e.fiscalYear}`;
+    const guidance = e.guidanceSummary ? `\n**Guidance:** ${e.guidanceSummary}` : "";
+    const commentary = e.managementCommentary ? `\n\n> ${e.managementCommentary}` : "";
+    return `### ${period}\n\n**Report Date:** ${e.reportDate ? isoDate(e.reportDate) : "—"} | **Thesis Impact:** \`${e.thesisImpact ?? "n/a"}\`${guidance}${commentary}`;
+  }).join("\n\n---\n\n");
+
+  return `---
+title: "${ticker} — Earnings History"
+ticker: ${ticker}
+tags: [investment-os, earnings, ${ticker.toLowerCase()}]
+exportedAt: ${EXPORTED_AT}
+source: investment-os
+---
+
+# ${ticker} — Earnings History
+
+> [[Investment OS/_Index|← Investment OS Index]] | [[Investment OS/Theses/${ticker}|${ticker} Thesis]]
+
+| Period | EPS Actual | EPS Est | EPS Result | Rev Actual | Rev Result | Thesis |
+|--------|-----------|---------|------------|------------|------------|--------|
+${rows || "_No earnings data_"}
+
+---
+
+${details || "_No detailed earnings data_"}
+
+---
+
+*Exported from Investment OS · ${EXPORTED_DATE}*
+`;
+}
+
 function renderIndex(
   theses: Array<{ ticker: string; title: string; confidenceScore: number; status: string; isDraft: boolean }>,
   reviewDates: string[],
   watchlistCount: number,
-  journalDates: string[]
+  journalDates: string[],
+  filingsCount: number,
+  earningsTickers: string[]
 ): string {
   const activeTheses = theses.filter(t => t.status === "active");
   const watchlistTheses = theses.filter(t => t.status === "watchlist");
@@ -455,8 +563,12 @@ graph TD
     IOS -->|export| REVIEWS["📊 Portfolio Reviews<br/>Investment OS/Reviews/"]
     IOS -->|export| WATCHLIST["👁 Watchlist<br/>Investment OS/Watchlist.md"]
     IOS -->|export| JOURNAL["📓 Journal<br/>Investment OS/Journal/"]
+    IOS -->|export| FILINGS["🗂 Filings<br/>Investment OS/Filings/"]
+    IOS -->|export| EARNINGS["📈 Earnings<br/>Investment OS/Earnings/"]
 
     THESES -->|wikilinks| HUMAN["🧠 Human Notes<br/>07 Investment/TICKER.md"]
+    FILINGS -->|wikilinks| THESES
+    EARNINGS -->|wikilinks| THESES
 
     subgraph "Brain OS — 07 Investment"
         HUMAN
@@ -464,6 +576,8 @@ graph TD
         REVIEWS
         WATCHLIST
         JOURNAL
+        FILINGS
+        EARNINGS
     end
 
     style IOS fill:#3E6AE1,color:#fff
@@ -489,6 +603,18 @@ ${reviewLinks || "_No reviews yet._"}
 ## Watchlist
 
 [[Watchlist]] — ${watchlistCount} items
+
+---
+
+## Filings
+
+[[Filings/_Index|SEC Filings Index]] — ${filingsCount} filings
+
+---
+
+## Earnings
+
+${earningsTickers.map(t => `- [[Earnings/${t}|${t}]]`).join("\n") || "_No earnings data yet._"}
 
 ---
 
@@ -564,11 +690,78 @@ async function main() {
     write(path.join(EXPORT_BASE, "Journal", `${date}.md`), renderJournalDay(date, dayEntries));
   }
 
+  // ── Filings ──────────────────────────────────────────────────────────────────
+  const rawFilings = await db.filing.findMany({
+    include: { thesisImpacts: { orderBy: { createdAt: "desc" }, take: 1 } },
+    orderBy: { filingDate: "desc" },
+    take: 100,
+  });
+
+  console.log(`\nFilings (${rawFilings.length}):`);
+  for (const f of rawFilings) {
+    const filename = `${f.ticker}-${f.filingType}-${isoDate(f.filingDate)}.md`;
+    write(path.join(EXPORT_BASE, "Filings", filename), renderFiling(f));
+  }
+
+  // Filings index
+  if (rawFilings.length > 0) {
+    const filingsByTicker = new Map<string, typeof rawFilings>();
+    for (const f of rawFilings) {
+      const arr = filingsByTicker.get(f.ticker) ?? [];
+      arr.push(f);
+      filingsByTicker.set(f.ticker, arr);
+    }
+    const filingIndexContent = `---
+title: SEC Filings Index
+tags: [investment-os, filings]
+exportedAt: ${EXPORTED_AT}
+source: investment-os
+---
+
+# SEC Filings Index
+
+> [[Investment OS/_Index|← Investment OS Index]]
+
+| Ticker | Type | Date | Impact |
+|--------|------|------|--------|
+${rawFilings.slice(0, 50).map(f => {
+  const impact = f.thesisImpacts[0]?.impactLevel ?? "—";
+  const link = `[[Filings/${f.ticker}-${f.filingType}-${isoDate(f.filingDate)}|${f.ticker} ${f.filingType}]]`;
+  return `| ${link} | ${f.filingType} | ${isoDate(f.filingDate)} | \`${impact}\` |`;
+}).join("\n")}
+
+---
+
+*Exported from Investment OS · ${EXPORTED_DATE}*
+`;
+    write(path.join(EXPORT_BASE, "Filings", "_Index.md"), filingIndexContent);
+  }
+
+  // ── Earnings ─────────────────────────────────────────────────────────────────
+  const rawEarnings = await db.earningsEvent.findMany({
+    orderBy: { reportDate: "desc" },
+    take: 200,
+  });
+
+  const earningsByTicker = new Map<string, typeof rawEarnings>();
+  for (const e of rawEarnings) {
+    const arr = earningsByTicker.get(e.ticker) ?? [];
+    arr.push(e);
+    earningsByTicker.set(e.ticker, arr);
+  }
+
+  console.log(`\nEarnings (${earningsByTicker.size} tickers, ${rawEarnings.length} events):`);
+  const earningsTickers: string[] = [];
+  for (const [ticker, events] of earningsByTicker) {
+    earningsTickers.push(ticker);
+    write(path.join(EXPORT_BASE, "Earnings", `${ticker}.md`), renderEarningsFile(ticker, events));
+  }
+
   // ── Index ────────────────────────────────────────────────────────────────────
   console.log("\nIndex:");
   write(
     path.join(EXPORT_BASE, "_Index.md"),
-    renderIndex(rawTheses, reviewDates, watchlistItems.length, journalDates)
+    renderIndex(rawTheses, reviewDates, watchlistItems.length, journalDates, rawFilings.length, earningsTickers)
   );
 
   await db.$disconnect();

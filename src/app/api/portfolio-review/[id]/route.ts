@@ -11,6 +11,9 @@ function parseReview(r: {
   mostUnderallocated: string; weakestThesis: string; reviewsDue: string;
   brainContextReport: string | null;
   topOpportunities: string;
+  filingsRequiringReview: string;
+  thesisAlerts: string;
+  newRisksDetected: string;
 }): PortfolioReviewRecord {
   return {
     id: r.id,
@@ -29,6 +32,9 @@ function parseReview(r: {
     reviewsDue:              JSON.parse(r.reviewsDue),
     brainContextReport:      r.brainContextReport ? JSON.parse(r.brainContextReport) : null,
     topOpportunities:        JSON.parse(r.topOpportunities),
+    filingsRequiringReview:  JSON.parse(r.filingsRequiringReview),
+    thesisAlerts:            JSON.parse(r.thesisAlerts),
+    newRisksDetected:        JSON.parse(r.newRisksDetected),
   };
 }
 

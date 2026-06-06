@@ -75,6 +75,11 @@ export interface WatchlistPrioritizationSection {
   topCandidate: string | null;
 }
 
+export interface FilingReviewCard extends ReviewCard {
+  filingType?: string;
+  impactLevel?: string;
+}
+
 export interface PortfolioReviewRecord {
   id: string;
   generatedAt: string;
@@ -92,6 +97,10 @@ export interface PortfolioReviewRecord {
   reviewsDue: ReviewCard[];
   brainContextReport: BrainOSContext | null;
   topOpportunities: OpportunityEntry[];
+  // Filing intelligence (Phase 5E)
+  filingsRequiringReview: FilingReviewCard[];
+  thesisAlerts: FilingReviewCard[];
+  newRisksDetected: FilingReviewCard[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -111,6 +120,9 @@ function parseReview(r: {
   mostUnderallocated: string; weakestThesis: string; reviewsDue: string;
   brainContextReport: string | null;
   topOpportunities: string;
+  filingsRequiringReview: string;
+  thesisAlerts: string;
+  newRisksDetected: string;
 }): PortfolioReviewRecord {
   return {
     id: r.id,
@@ -129,6 +141,9 @@ function parseReview(r: {
     reviewsDue: JSON.parse(r.reviewsDue),
     brainContextReport: r.brainContextReport ? JSON.parse(r.brainContextReport) : null,
     topOpportunities: JSON.parse(r.topOpportunities),
+    filingsRequiringReview: JSON.parse(r.filingsRequiringReview),
+    thesisAlerts: JSON.parse(r.thesisAlerts),
+    newRisksDetected: JSON.parse(r.newRisksDetected),
   };
 }
 
@@ -456,6 +471,101 @@ async function generateReview(notes: string | null): Promise<PortfolioReviewReco
     // opportunities are non-critical — don't fail the review if engine errors
   }
 
+  // ── Filing Intelligence Cards (Phase 5E) ──────────────────────────────────
+  let filingsRequiringReview: FilingReviewCard[] = [];
+  let thesisAlerts: FilingReviewCard[] = [];
+  let newRisksDetected: FilingReviewCard[] = [];
+
+  try {
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 86_400_000);
+
+    const [recentFilings, weakenedImpacts, riskImpacts] = await Promise.all([
+      db.filing.findMany({
+        where: {
+          filingDate: { gte: sevenDaysAgo },
+          filingType: { in: ["10-K", "10-Q", "8-K"] },
+        },
+        orderBy: { filingDate: "desc" },
+        take: 10,
+        include: { thesisImpacts: { orderBy: { createdAt: "desc" }, take: 1 } },
+      }),
+      db.thesisImpactRecord.findMany({
+        where: {
+          impactLevel: { in: ["weakened", "kill_criteria_triggered"] },
+          createdAt: { gte: sevenDaysAgo },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+        include: { filing: { select: { filingType: true, filingDate: true } } },
+      }),
+      db.thesisImpactRecord.findMany({
+        where: { impactLevel: "weakened", createdAt: { gte: new Date(now.getTime() - 30 * 86_400_000) } },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+      }),
+    ]);
+
+    filingsRequiringReview = recentFilings.map(f => ({
+      ticker: f.ticker,
+      headline: `${f.filingType} — ${f.ticker}`,
+      detail: f.summary || `New ${f.filingType} filing from ${f.filingDate.toISOString().slice(0, 10)}. Review for thesis impact.`,
+      severity: (f.filingType === "10-K" ? "high" : "medium") as ReviewSeverity,
+      filingType: f.filingType,
+      impactLevel: f.thesisImpacts[0]?.impactLevel ?? "unknown",
+    }));
+
+    if (filingsRequiringReview.length === 0) {
+      filingsRequiringReview = [{
+        ticker: null,
+        headline: "No new filings in last 7 days",
+        detail: "Run ingestion to check for new SEC filings.",
+        severity: "info",
+      }];
+    }
+
+    thesisAlerts = weakenedImpacts.map(t => ({
+      ticker: t.ticker,
+      headline: t.impactLevel === "kill_criteria_triggered"
+        ? `Kill criteria triggered: ${t.ticker}`
+        : `Thesis weakened: ${t.ticker}`,
+      detail: t.reasoning,
+      severity: (t.impactLevel === "kill_criteria_triggered" ? "critical" : "high") as ReviewSeverity,
+      filingType: t.filing?.filingType,
+      impactLevel: t.impactLevel,
+    }));
+
+    if (thesisAlerts.length === 0) {
+      thesisAlerts = [{
+        ticker: null,
+        headline: "No thesis alerts",
+        detail: "No weakening or kill-criteria signals detected in recent filings.",
+        severity: "low",
+      }];
+    }
+
+    newRisksDetected = riskImpacts.map(t => ({
+      ticker: t.ticker,
+      headline: `New risk signal: ${t.ticker}`,
+      detail: t.reasoning,
+      severity: "medium" as ReviewSeverity,
+      impactLevel: t.impactLevel,
+    }));
+
+    if (newRisksDetected.length === 0) {
+      newRisksDetected = [{
+        ticker: null,
+        headline: "No new risks detected",
+        detail: "No new risk signals from SEC filings in the past 30 days.",
+        severity: "low",
+      }];
+    }
+  } catch {
+    // filing intelligence is non-critical
+    filingsRequiringReview = [{ ticker: null, headline: "Filing data unavailable", detail: "Run SEC ingestion to populate.", severity: "info" }];
+    thesisAlerts = [{ ticker: null, headline: "No data", detail: "Filing analysis not yet run.", severity: "info" }];
+    newRisksDetected = [{ ticker: null, headline: "No data", detail: "Filing analysis not yet run.", severity: "info" }];
+  }
+
   // ── Persist ───────────────────────────────────────────────────────────────
   const saved = await db.portfolioReview.create({
     data: {
@@ -473,6 +583,9 @@ async function generateReview(notes: string | null): Promise<PortfolioReviewReco
       reviewsDue:              JSON.stringify(reviewsDue),
       brainContextReport:      ctx.loaded ? JSON.stringify(ctx) : null,
       topOpportunities:        JSON.stringify(topOpportunities),
+      filingsRequiringReview:  JSON.stringify(filingsRequiringReview),
+      thesisAlerts:            JSON.stringify(thesisAlerts),
+      newRisksDetected:        JSON.stringify(newRisksDetected),
     },
   });
 

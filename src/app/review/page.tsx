@@ -771,6 +771,83 @@ export default function ReviewPage() {
             </div>
           </div>
 
+          {/* ── Filing Intelligence Cards (Phase 5E) ── */}
+          {(selected.filingsRequiringReview?.length > 0 || selected.thesisAlerts?.length > 0 || selected.newRisksDetected?.length > 0) && (
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[#8E8E8E] mb-2 px-1">
+                Primary Source Intelligence
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {/* Filings Requiring Review */}
+                <div className="bg-white rounded-xl p-4 flex flex-col gap-2 border border-[#EEEEEE]">
+                  <div className="flex items-center gap-2 mb-1">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3E6AE1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-[#8E8E8E]">Recent Filings</span>
+                  </div>
+                  <div className="space-y-2">
+                    {(selected.filingsRequiringReview ?? []).slice(0, 4).map((card, i) => (
+                      <div key={i} className="flex items-start gap-2">
+                        {card.ticker && <span className="text-xs font-bold text-[#3E6AE1] w-12 shrink-0 pt-0.5">{card.ticker}</span>}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-[#171A20] leading-snug">{card.headline}</p>
+                          <p className="text-[11px] text-[#8E8E8E] leading-snug mt-0.5 line-clamp-2">{card.detail}</p>
+                        </div>
+                        <SeverityBadge s={card.severity} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Thesis Alerts */}
+                <div className="bg-white rounded-xl p-4 flex flex-col gap-2 border border-[#EEEEEE]">
+                  <div className="flex items-center gap-2 mb-1">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                      <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-[#8E8E8E]">Thesis Alerts</span>
+                  </div>
+                  <div className="space-y-2">
+                    {(selected.thesisAlerts ?? []).slice(0, 4).map((card, i) => (
+                      <div key={i} className="flex items-start gap-2">
+                        {card.ticker && <span className="text-xs font-bold text-[#3E6AE1] w-12 shrink-0 pt-0.5">{card.ticker}</span>}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-[#171A20] leading-snug">{card.headline}</p>
+                          <p className="text-[11px] text-[#8E8E8E] leading-snug mt-0.5 line-clamp-2">{card.detail}</p>
+                        </div>
+                        <SeverityBadge s={card.severity} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* New Risks Detected */}
+                <div className="bg-white rounded-xl p-4 flex flex-col gap-2 border border-[#EEEEEE]">
+                  <div className="flex items-center gap-2 mb-1">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-[#8E8E8E]">New Risks Detected</span>
+                  </div>
+                  <div className="space-y-2">
+                    {(selected.newRisksDetected ?? []).slice(0, 4).map((card, i) => (
+                      <div key={i} className="flex items-start gap-2">
+                        {card.ticker && <span className="text-xs font-bold text-[#3E6AE1] w-12 shrink-0 pt-0.5">{card.ticker}</span>}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-[#171A20] leading-snug">{card.headline}</p>
+                          <p className="text-[11px] text-[#8E8E8E] leading-snug mt-0.5 line-clamp-2">{card.detail}</p>
+                        </div>
+                        <SeverityBadge s={card.severity} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── Section Detail Tabs ── */}
           <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
             <div className="border-b border-[#EEEEEE] flex overflow-x-auto">
