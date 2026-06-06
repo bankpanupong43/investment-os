@@ -121,6 +121,17 @@ const NAV = [
     ),
   },
   {
+    href: "/committee",
+    label: "Committee",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="8" r="4" />
+        <path d="M6 20v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
+        <line x1="2" y1="12" x2="6" y2="12" /><line x1="18" y1="12" x2="22" y2="12" />
+      </svg>
+    ),
+  },
+  {
     href: "/filings",
     label: "Filings",
     icon: (

@@ -611,6 +611,21 @@ model IngestionLog {
   @@map("ingestion_logs")
 }
 
+// ─── RecommendationFeedback ───────────────────────────────────────────────────
+// User signal on a ticker recommendation — drives the learning layer.
+
+model RecommendationFeedback {
+  id           String   @id @default(cuid())
+  ticker       String
+  feedbackType String   // interested | not_interested | already_owned | disagree | researching
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  @@index([ticker])
+  @@index([createdAt])
+  @@map("recommendation_feedback")
+}
+
 // ─── Backup ───────────────────────────────────────────────────────────────────
 // Audit record for every backup operation.
 
@@ -644,6 +659,29 @@ model Job {
   @@index([status])
   @@index([startedAt])
   @@map("jobs")
+}
+
+// ─── CommitteeSession ─────────────────────────────────────────────────────────
+// Evidence-based investment committee debate — one session per ticker per run.
+// All 5 member outputs are stored as JSON. Every claim must cite evidence IDs.
+
+model CommitteeSession {
+  id             String   @id @default(cuid())
+  ticker         String
+  companyName    String   @default("")
+  sector         String?
+  universeTier   String   @default("tier1")
+  bullCase       String   // JSON: BullCase
+  bearCase       String   // JSON: BearCase
+  riskAssessment String   // JSON: RiskAssessment
+  thesisAudit    String   // JSON: ThesisAudit
+  finalDecision  String   // JSON: FinalDecision
+  conviction     String   // Strong Buy | Buy | Watch | Hold | Pass
+  createdAt      DateTime @default(now())
+
+  @@index([ticker])
+  @@index([conviction])
+  @@map("committee_sessions")
 }
 
 // ─── Brief ────────────────────────────────────────────────────────────────────
