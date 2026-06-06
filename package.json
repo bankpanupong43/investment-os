@@ -19,7 +19,8 @@
     "db:seed-universe": "tsx prisma/seed-universe.ts",
     "validate:screener": "tsx scripts/validate-screener.ts",
     "validate:ingestion": "tsx scripts/validate-ingestion.ts",
-    "refresh:universe": "tsx scripts/run-universe-refresh.ts"
+    "refresh:universe": "tsx scripts/run-universe-refresh.ts",
+    "validate:opportunities": "tsx scripts/validate-opportunities.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

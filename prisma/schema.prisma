@@ -399,6 +399,9 @@ model PortfolioReview {
   // Brain OS context that was active when this review was generated
   brainContextReport String? // JSON: BrainOSContext | null
 
+  // Top 3 opportunities at review time
+  topOpportunities String @default("[]") // JSON: OpportunityEntry[]
+
   @@map("portfolio_reviews")
 }
 
@@ -464,6 +467,27 @@ model UniverseScore {
   universe Universe @relation(fields: [universeId], references: [id], onDelete: Cascade)
 
   @@map("universe_scores")
+}
+
+// ─── OpportunityScore ────────────────────────────────────────────────────────
+// Saved snapshot of opportunity scores for each universe entry.
+// Latest record per ticker is the current score.
+
+model OpportunityScore {
+  id                   String   @id @default(cuid())
+  ticker               String
+  companyScore         Float
+  allocationGapScore   Float
+  diversificationScore Float
+  watchlistScore       Float
+  brainAlignmentScore  Float
+  opportunityScore     Float
+  reasoning            String   @default("{}") // JSON: OpportunityReasoning
+  generatedAt          DateTime @default(now())
+
+  @@index([ticker])
+  @@index([opportunityScore])
+  @@map("opportunity_scores")
 }
 
 // ─── IngestionLog ─────────────────────────────────────────────────────────────

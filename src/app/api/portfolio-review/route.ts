@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { loadBrainContext, type BrainOSContext } from "@/lib/brain-os-context";
+import { computeOpportunities, type OpportunityEntry } from "@/lib/opportunity-engine";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -90,6 +91,7 @@ export interface PortfolioReviewRecord {
   weakestThesis: ReviewCard;
   reviewsDue: ReviewCard[];
   brainContextReport: BrainOSContext | null;
+  topOpportunities: OpportunityEntry[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -108,6 +110,7 @@ function parseReview(r: {
   biggestRisk: string; biggestOpportunity: string;
   mostUnderallocated: string; weakestThesis: string; reviewsDue: string;
   brainContextReport: string | null;
+  topOpportunities: string;
 }): PortfolioReviewRecord {
   return {
     id: r.id,
@@ -125,6 +128,7 @@ function parseReview(r: {
     weakestThesis: JSON.parse(r.weakestThesis),
     reviewsDue: JSON.parse(r.reviewsDue),
     brainContextReport: r.brainContextReport ? JSON.parse(r.brainContextReport) : null,
+    topOpportunities: JSON.parse(r.topOpportunities),
   };
 }
 
@@ -443,6 +447,15 @@ async function generateReview(notes: string | null): Promise<PortfolioReviewReco
     });
   }
 
+  // ── Top Opportunities ─────────────────────────────────────────────────────
+  let topOpportunities: OpportunityEntry[] = [];
+  try {
+    const oppResult = await computeOpportunities();
+    topOpportunities = oppResult.entries.slice(0, 3);
+  } catch {
+    // opportunities are non-critical — don't fail the review if engine errors
+  }
+
   // ── Persist ───────────────────────────────────────────────────────────────
   const saved = await db.portfolioReview.create({
     data: {
@@ -459,6 +472,7 @@ async function generateReview(notes: string | null): Promise<PortfolioReviewReco
       weakestThesis:           JSON.stringify(weakestThesis),
       reviewsDue:              JSON.stringify(reviewsDue),
       brainContextReport:      ctx.loaded ? JSON.stringify(ctx) : null,
+      topOpportunities:        JSON.stringify(topOpportunities),
     },
   });
 

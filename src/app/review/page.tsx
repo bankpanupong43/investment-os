@@ -11,6 +11,7 @@ import type {
   CashAllocationSection,
   WatchlistPrioritizationSection,
 } from "@/app/api/portfolio-review/route";
+import type { OpportunityEntry } from "@/app/api/opportunities/route";
 
 // ─── Severity helpers ─────────────────────────────────────────────────────────
 
@@ -427,17 +428,110 @@ function WatchlistSection({ data }: { data: WatchlistPrioritizationSection }) {
   );
 }
 
+// ─── Section: Top Opportunities ──────────────────────────────────────────────
+
+function OpportunitiesSection({ data }: { data: OpportunityEntry[] }) {
+  const fmtUsd = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+
+  if (data.length === 0) {
+    return (
+      <p className="text-sm text-[#8E8E8E]">
+        No opportunities computed. Generate a new review to include opportunity scores.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-[#8E8E8E]">
+        Top 3 opportunities at review time — scored by quality × allocation gap × diversification × watchlist × Brain OS fit.
+        See the full <a href="/opportunities" className="text-[#3E6AE1] hover:underline">Opportunity Engine</a> for all ranked entries.
+      </p>
+
+      {data.map((entry, i) => {
+        const scoreColor =
+          entry.opportunityScore >= 75 ? "#2d7d46" :
+          entry.opportunityScore >= 55 ? "#3E6AE1" : "#D97706";
+
+        return (
+          <div key={entry.ticker} className="border border-[#EEEEEE] rounded-xl p-4 space-y-3">
+            {/* Header */}
+            <div className="flex items-center gap-3">
+              <span className="w-6 h-6 rounded-full bg-[#3E6AE1] text-white text-xs font-bold flex items-center justify-center shrink-0">
+                {i + 1}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-bold text-[#171A20]">{entry.ticker}</span>
+                  <span className="text-xs text-[#8E8E8E]">{entry.companyName}</span>
+                  {entry.inPortfolio && (
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                      style={{ backgroundColor: "#F0FDF4", color: "#15803D" }}>In Portfolio</span>
+                  )}
+                  {entry.inWatchlist && (
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                      style={{ backgroundColor: "#EEF3FD", color: "#3E6AE1" }}>Watchlist</span>
+                  )}
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-xl font-bold" style={{ color: scoreColor }}>
+                  {entry.opportunityScore.toFixed(1)}
+                </div>
+                <div className="text-[10px] text-[#AAAAAA]">opp score</div>
+              </div>
+            </div>
+
+            {/* Reasoning */}
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-[#171A20]">{entry.reasoning.whyBuy}</p>
+              <p className="text-xs text-[#5C5E62]">{entry.reasoning.whyNow}</p>
+            </div>
+
+            {/* Allocation suggestion */}
+            <div className="flex gap-2">
+              {[
+                { label: "Starter", pct: entry.suggestedAllocation.starterPct, usd: entry.suggestedAllocation.starterUsd },
+                { label: "Target", pct: entry.suggestedAllocation.targetPct, usd: entry.suggestedAllocation.targetUsd },
+              ].map(a => (
+                <div key={a.label} className="flex-1 bg-[#F4F4F4] rounded-lg p-2 text-center">
+                  <div className="text-[10px] text-[#8E8E8E] uppercase tracking-wide">{a.label}</div>
+                  <div className="text-sm font-semibold text-[#171A20]">{a.pct.toFixed(1)}%</div>
+                  <div className="text-[11px] text-[#5C5E62]">{fmtUsd(a.usd)}</div>
+                </div>
+              ))}
+              <div className="flex items-center">
+                <span
+                  className="text-xs font-semibold px-2 py-1 rounded"
+                  style={
+                    entry.reasoning.positionType === "initiate"
+                      ? { backgroundColor: "#EEF3FD", color: "#3E6AE1" }
+                      : { backgroundColor: "#F0FDF4", color: "#15803D" }
+                  }
+                >
+                  {entry.reasoning.positionType === "initiate" ? "Initiate" : "Add More"}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Section tabs ─────────────────────────────────────────────────────────────
 
-type TabId = "summary" | "allocation" | "thesis" | "risk" | "cash" | "watchlist";
+type TabId = "summary" | "allocation" | "thesis" | "risk" | "cash" | "watchlist" | "opportunities";
 
 const TABS: { id: TabId; label: string }[] = [
-  { id: "summary",    label: "Portfolio Summary" },
-  { id: "allocation", label: "Allocation" },
-  { id: "thesis",     label: "Thesis Coverage" },
-  { id: "risk",       label: "Risk" },
-  { id: "cash",       label: "Cash" },
-  { id: "watchlist",  label: "Watchlist" },
+  { id: "summary",       label: "Portfolio Summary" },
+  { id: "allocation",    label: "Allocation" },
+  { id: "thesis",        label: "Thesis Coverage" },
+  { id: "risk",          label: "Risk" },
+  { id: "cash",          label: "Cash" },
+  { id: "watchlist",     label: "Watchlist" },
+  { id: "opportunities", label: "Opportunities" },
 ];
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -697,12 +791,13 @@ export default function ReviewPage() {
             </div>
 
             <div className="p-5">
-              {activeTab === "summary"    && <SummarySection    data={selected.portfolioSummary} />}
-              {activeTab === "allocation" && <AllocationSection data={selected.allocationAnalysis} />}
-              {activeTab === "thesis"     && <ThesisSection     data={selected.thesisCoverageAnalysis} />}
-              {activeTab === "risk"       && <RiskSection       data={selected.riskAnalysis} />}
-              {activeTab === "cash"       && <CashSection       data={selected.cashAllocationReview} />}
-              {activeTab === "watchlist"  && <WatchlistSection  data={selected.watchlistPrioritization} />}
+              {activeTab === "summary"       && <SummarySection       data={selected.portfolioSummary} />}
+              {activeTab === "allocation"    && <AllocationSection    data={selected.allocationAnalysis} />}
+              {activeTab === "thesis"        && <ThesisSection        data={selected.thesisCoverageAnalysis} />}
+              {activeTab === "risk"          && <RiskSection          data={selected.riskAnalysis} />}
+              {activeTab === "cash"          && <CashSection          data={selected.cashAllocationReview} />}
+              {activeTab === "watchlist"     && <WatchlistSection     data={selected.watchlistPrioritization} />}
+              {activeTab === "opportunities" && <OpportunitiesSection data={selected.topOpportunities ?? []} />}
             </div>
           </div>
         </>

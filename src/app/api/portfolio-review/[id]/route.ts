@@ -10,6 +10,7 @@ function parseReview(r: {
   biggestRisk: string; biggestOpportunity: string;
   mostUnderallocated: string; weakestThesis: string; reviewsDue: string;
   brainContextReport: string | null;
+  topOpportunities: string;
 }): PortfolioReviewRecord {
   return {
     id: r.id,
@@ -27,6 +28,7 @@ function parseReview(r: {
     weakestThesis:           JSON.parse(r.weakestThesis),
     reviewsDue:              JSON.parse(r.reviewsDue),
     brainContextReport:      r.brainContextReport ? JSON.parse(r.brainContextReport) : null,
+    topOpportunities:        JSON.parse(r.topOpportunities),
   };
 }
 
