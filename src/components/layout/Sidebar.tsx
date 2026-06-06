@@ -111,6 +111,15 @@ const NAV = [
       </svg>
     ),
   },
+  {
+    href: "/research",
+    label: "Research",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2l2 7h7l-5.5 4 2 7L12 16l-5.5 4 2-7L3 9h7z" />
+      </svg>
+    ),
+  },
 ];
 
 export function Sidebar() {

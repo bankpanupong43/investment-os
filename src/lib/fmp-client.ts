@@ -171,3 +171,30 @@ function r2(v: number): number {
 }
 
 export { ALL_FIELDS };
+
+// ─── Company Profile ──────────────────────────────────────────────────────────
+
+export interface FMPProfile {
+  symbol:              string;
+  companyName:         string;
+  sector:              string | null;
+  industry:            string | null;
+  description:         string | null;
+  ceo:                 string | null;
+  fullTimeEmployees:   string | null;
+  website:             string | null;
+  mktCap:              number | null;
+  beta:                number | null;
+  country:             string | null;
+}
+
+export async function fetchCompanyProfile(ticker: string, apiKey: string): Promise<FMPProfile | null> {
+  try {
+    const arr = await stableGet<FMPProfile>("profile", ticker, apiKey);
+    const p = arr[0] ?? null;
+    if (!p || !p.symbol) return null;
+    return p;
+  } catch {
+    return null;
+  }
+}

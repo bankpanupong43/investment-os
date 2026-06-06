@@ -68,7 +68,20 @@ function AllocationBox({ label, pct, usd }: { label: string; pct: number; usd: n
 
 function OpportunityCard({ entry }: { entry: OpportunityEntry }) {
   const [expanded, setExpanded] = useState(false);
+  const [researchState, setResearchState] = useState<"idle" | "generating" | "done">("idle");
   const scoreColor = entry.opportunityScore >= 75 ? "#2d7d46" : entry.opportunityScore >= 55 ? "#3E6AE1" : "#D97706";
+
+  async function handleGenerateResearch(e: React.MouseEvent) {
+    e.stopPropagation();
+    setResearchState("generating");
+    try {
+      const res = await fetch(`/api/research/${entry.ticker}/generate`, { method: "POST" });
+      if (res.ok) setResearchState("done");
+      else setResearchState("idle");
+    } catch {
+      setResearchState("idle");
+    }
+  }
 
   return (
     <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
@@ -185,8 +198,8 @@ function OpportunityCard({ entry }: { entry: OpportunityEntry }) {
             )}
           </div>
 
-          {/* Action badge */}
-          <div className="flex items-center gap-2">
+          {/* Action badge + Generate Research */}
+          <div className="flex items-center gap-2 flex-wrap">
             <span
               className="text-xs font-semibold px-3 py-1.5 rounded-lg"
               style={
@@ -206,6 +219,24 @@ function OpportunityCard({ entry }: { entry: OpportunityEntry }) {
             {entry.sector && (
               <span className="text-xs text-[#AAAAAA]">{entry.sector}</span>
             )}
+            <div className="ml-auto">
+              {researchState === "done" ? (
+                <a
+                  href="/research"
+                  className="text-xs font-medium px-3 py-1.5 rounded border border-[#BBF7D0] text-[#15803D] hover:bg-[#F0FDF4] transition-colors"
+                >
+                  View Dossier →
+                </a>
+              ) : (
+                <button
+                  onClick={handleGenerateResearch}
+                  disabled={researchState === "generating"}
+                  className="text-xs font-medium px-3 py-1.5 rounded border border-[#EEEEEE] text-[#5C5E62] hover:border-[#3E6AE1] hover:text-[#3E6AE1] transition-colors disabled:opacity-50"
+                >
+                  {researchState === "generating" ? "Generating…" : "Generate Research"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
