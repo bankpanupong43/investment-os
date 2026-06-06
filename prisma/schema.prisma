@@ -402,6 +402,70 @@ model PortfolioReview {
   @@map("portfolio_reviews")
 }
 
+// ─── Universe ─────────────────────────────────────────────────────────────────
+// Master list of investable securities across all tiers.
+
+model Universe {
+  id           String   @id @default(cuid())
+  ticker       String   @unique
+  companyName  String
+  exchange     String?
+  sector       String?
+  industry     String?
+  marketCap    Float?   // USD millions
+  universeTier String   // tier1 | tier2 | tier3 | tier4 | tier5
+  country      String   @default("US")
+  assetType    String   @default("equity") // equity | etf
+  status       String   @default("active") // active | excluded | delisted
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  fundamentals Fundamental?
+  scores       UniverseScore[]
+
+  @@map("universe")
+}
+
+// ─── Fundamental ──────────────────────────────────────────────────────────────
+// Financial metrics for a universe entry. Updated by data ingestion.
+
+model Fundamental {
+  id                String   @id @default(cuid())
+  universeId        String   @unique
+  revenueGrowth     Float?   // YoY %
+  epsGrowth         Float?   // YoY %
+  grossMargin       Float?   // % (0-100)
+  operatingMargin   Float?   // % (0-100)
+  freeCashFlow      Float?   // USD millions
+  debtToEquity      Float?
+  roic              Float?   // % (0-100)
+  sharesOutstanding Float?   // millions
+  updatedAt         DateTime @updatedAt
+
+  universe Universe @relation(fields: [universeId], references: [id], onDelete: Cascade)
+
+  @@map("fundamentals")
+}
+
+// ─── UniverseScore ────────────────────────────────────────────────────────────
+// Cached scoring output per universe entry. Latest record is the current score.
+
+model UniverseScore {
+  id                String   @id @default(cuid())
+  universeId        String
+  businessQuality   Float    // 0-100
+  growth            Float    // 0-100
+  financialStrength Float    // 0-100
+  capitalAllocation Float    // 0-100
+  valuation         Float    // 0-100 (placeholder until price data)
+  totalScore        Float    // 0-100
+  scoredAt          DateTime @default(now())
+
+  universe Universe @relation(fields: [universeId], references: [id], onDelete: Cascade)
+
+  @@map("universe_scores")
+}
+
 // ─── Brief ────────────────────────────────────────────────────────────────────
 
 model Brief {
