@@ -130,6 +130,7 @@ function parseReview(r: {
   cashAllocationReview: string; watchlistPrioritization: string;
   biggestRisk: string; biggestOpportunity: string;
   mostUnderallocated: string; weakestThesis: string; reviewsDue: string;
+  brainContextReport: string | null;
 }) {
   return {
     id: r.id,
@@ -146,6 +147,7 @@ function parseReview(r: {
     mostUnderallocated:      JSON.parse(r.mostUnderallocated) as ReviewCard,
     weakestThesis:           JSON.parse(r.weakestThesis) as ReviewCard,
     reviewsDue:              JSON.parse(r.reviewsDue) as ReviewCard[],
+    brainContextReport:      r.brainContextReport ? JSON.parse(r.brainContextReport) : null,
   };
 }
 
@@ -284,6 +286,28 @@ ${ra.triggeredKills.length > 0
 |--------|----------|--------------|--------|
 ${watchlistRows}
 
+${r.brainContextReport ? `---
+
+## Brain Context Report
+
+> Brain OS notes that influenced the recommendations above.
+
+**Investor:** ${r.brainContextReport.investor.name}, age ${r.brainContextReport.investor.age} | **Risk Tolerance:** ${r.brainContextReport.investor.riskTolerance} | **Sources loaded:** ${r.brainContextReport.sources.length}
+
+**Primary Goal:** ${r.brainContextReport.investor.primaryGoal}
+
+**Decision Filter:** ${r.brainContextReport.philosophy.decisionFilter}
+
+### Influences
+
+${r.brainContextReport.influences.map((inf: { source: string; insight: string; appliesTo: string[]; excerpt: string }) =>
+  `**${inf.source}** → \`${inf.appliesTo.join(", ")}\`\n> "${inf.excerpt}"\n\n_${inf.insight}_`
+).join("\n\n")}
+
+### Sources Loaded
+${r.brainContextReport.sources.map((s: string) => `- ✓ ${s}`).join("\n")}
+${r.brainContextReport.missingFiles.length > 0 ? "\n### Sources Not Found\n" + r.brainContextReport.missingFiles.map((s: string) => `- ✗ ${s}`).join("\n") : ""}
+` : ""}
 ---
 
 *Exported from Investment OS · ${EXPORTED_DATE}*

@@ -396,6 +396,9 @@ model PortfolioReview {
   weakestThesis      String  // JSON: ReviewCard
   reviewsDue         String  // JSON: ReviewCard[]
 
+  // Brain OS context that was active when this review was generated
+  brainContextReport String? // JSON: BrainOSContext | null
+
   @@map("portfolio_reviews")
 }
 

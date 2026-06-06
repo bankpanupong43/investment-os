@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { loadBrainContext, type BrainOSContext } from "@/lib/brain-os-context";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,6 +89,7 @@ export interface PortfolioReviewRecord {
   mostUnderallocated: ReviewCard;
   weakestThesis: ReviewCard;
   reviewsDue: ReviewCard[];
+  brainContextReport: BrainOSContext | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -105,6 +107,7 @@ function parseReview(r: {
   cashAllocationReview: string; watchlistPrioritization: string;
   biggestRisk: string; biggestOpportunity: string;
   mostUnderallocated: string; weakestThesis: string; reviewsDue: string;
+  brainContextReport: string | null;
 }): PortfolioReviewRecord {
   return {
     id: r.id,
@@ -121,12 +124,22 @@ function parseReview(r: {
     mostUnderallocated: JSON.parse(r.mostUnderallocated),
     weakestThesis: JSON.parse(r.weakestThesis),
     reviewsDue: JSON.parse(r.reviewsDue),
+    brainContextReport: r.brainContextReport ? JSON.parse(r.brainContextReport) : null,
   };
 }
 
 // ─── Review generation ────────────────────────────────────────────────────────
 
+function contextNote(ctx: BrainOSContext, section: string): string {
+  if (!ctx.loaded) return "";
+  const influence = ctx.influences.find(i => i.appliesTo.includes(section));
+  if (!influence) return "";
+  return ` ${influence.insight}`;
+}
+
 async function generateReview(notes: string | null): Promise<PortfolioReviewRecord> {
+  const ctx = loadBrainContext();
+
   const [positions, theses, allocationTargets, settings, watchlistItems] = await Promise.all([
     db.position.findMany({
       where: { status: "active" },
@@ -318,7 +331,7 @@ async function generateReview(notes: string | null): Promise<PortfolioReviewReco
     biggestRisk = {
       ticker: triggeredKills[0].ticker,
       headline: `Kill condition triggered: ${triggeredKills[0].ticker}`,
-      detail: triggeredKills[0].description,
+      detail: `${triggeredKills[0].description}${ctx.loaded ? " Given your scholarship bond constraint, capital loss here delays the exit runway — act immediately." : ""}`,
       severity: "critical",
     };
   } else if (lowConfidencePositions.length > 0) {
@@ -326,21 +339,21 @@ async function generateReview(notes: string | null): Promise<PortfolioReviewReco
     biggestRisk = {
       ticker: worst.ticker,
       headline: `Low conviction: ${worst.ticker}`,
-      detail: `Thesis confidence at ${worst.score}/10. Consider reviewing or reducing.`,
+      detail: `Thesis confidence at ${worst.score}/10.${ctx.loaded ? ` At 25 with a long-term horizon, weak conviction that isn't improving warrants a full Buffett/Lynch reassessment before adding capital.` : " Consider reviewing or reducing."}`,
       severity: "high",
     };
   } else if (overdueTheses.length > 0) {
     biggestRisk = {
       ticker: overdueTheses[0].ticker,
       headline: `${overdueTheses.length} thesis review${overdueTheses.length > 1 ? "s" : ""} overdue`,
-      detail: `${overdueTheses[0].ticker} is ${overdueTheses[0].daysOverdue ?? 0}d overdue.`,
+      detail: `${overdueTheses[0].ticker} is ${overdueTheses[0].daysOverdue ?? 0}d overdue.${ctx.loaded ? " Time-constrained as a military officer — schedule a focused 30-min review session rather than waiting for a perfect window." : ""}`,
       severity: "medium",
     };
   } else {
     biggestRisk = {
       ticker: null,
       headline: "No critical risks identified",
-      detail: "All positions are within acceptable conviction thresholds.",
+      detail: `All positions are within acceptable conviction thresholds.${ctx.loaded ? " Continue compounding toward financial independence." : ""}`,
       severity: "low",
     };
   }
@@ -352,14 +365,14 @@ async function generateReview(notes: string | null): Promise<PortfolioReviewReco
     biggestOpportunity = {
       ticker: top.ticker,
       headline: `Add to ${top.ticker}`,
-      detail: `${top.pctFunded.toFixed(0)}% funded — $${top.gapUsd.toLocaleString("en-US", { maximumFractionDigits: 0 })} gap to target.`,
+      detail: `${top.pctFunded.toFixed(0)}% funded — $${top.gapUsd.toLocaleString("en-US", { maximumFractionDigits: 0 })} gap to target.${ctx.loaded ? ` Closing this gap compounds directly toward financial independence before 40 — prioritize when cash becomes available.` : ""}`,
       severity: "info",
     };
   } else {
     biggestOpportunity = {
       ticker: null,
       headline: "Portfolio fully allocated",
-      detail: "All allocation targets are met or exceeded.",
+      detail: `All allocation targets are met or exceeded.${ctx.loaded ? " Consider increasing total capital target or expanding the watchlist to deploy additional capital." : ""}`,
       severity: "info",
     };
   }
@@ -371,7 +384,7 @@ async function generateReview(notes: string | null): Promise<PortfolioReviewReco
     mostUnderallocated = {
       ticker: top.ticker,
       headline: `${top.ticker} — ${top.pctFunded.toFixed(0)}% funded`,
-      detail: `$${top.gapUsd.toLocaleString("en-US", { maximumFractionDigits: 0 })} below target (${top.bucket}).`,
+      detail: `$${top.gapUsd.toLocaleString("en-US", { maximumFractionDigits: 0 })} below target (${top.bucket}).${ctx.loaded ? ` This is the highest-priority capital deployment for accelerating the scholarship repayment runway.` : ""}`,
       severity: top.pctFunded < 50 ? "high" : "medium",
     };
   } else {
@@ -387,10 +400,14 @@ async function generateReview(notes: string | null): Promise<PortfolioReviewReco
   let weakestThesis: ReviewCard;
   if (sortedByConfAsc.length > 0) {
     const weakest = sortedByConfAsc[0];
+    const draftNote = weakest.isDraft ? " — draft, needs human review" : "";
+    const ctxNote = ctx.loaded
+      ? ` Per Buffett/Lynch framework: verify business quality score, competitive moat, and whether this still belongs in a quality-at-reasonable-price portfolio.`
+      : "";
     weakestThesis = {
       ticker: weakest.ticker,
       headline: `${weakest.ticker} — ${weakest.confidenceScore}/10 conviction`,
-      detail: `"${weakest.title}"${weakest.isDraft ? " — draft, needs human review." : "."}`,
+      detail: `"${weakest.title}"${draftNote}.${ctxNote}`,
       severity: weakest.confidenceScore < 5 ? "high" : weakest.confidenceScore < 7 ? "medium" : "low",
     };
   } else {
@@ -403,20 +420,25 @@ async function generateReview(notes: string | null): Promise<PortfolioReviewReco
   }
 
   // Reviews Due
-  const reviewsDue: ReviewCard[] = overdueTheses.slice(0, 5).map(t => ({
-    ticker: t.ticker,
-    headline: `${t.ticker} — ${t.daysOverdue ?? 0}d overdue`,
-    detail: `"${t.title}"${t.lastReviewedAt
-      ? ` — last reviewed ${Math.floor((now.getTime() - t.lastReviewedAt.getTime()) / 86_400_000)}d ago`
-      : " — never reviewed"}.`,
-    severity: (t.daysOverdue ?? 0) > 30 ? "high" : "medium",
-  }));
+  const reviewsDue: ReviewCard[] = overdueTheses.slice(0, 5).map(t => {
+    const daysSince = t.lastReviewedAt
+      ? Math.floor((now.getTime() - t.lastReviewedAt.getTime()) / 86_400_000)
+      : null;
+    const lastSeen = daysSince !== null ? ` — last reviewed ${daysSince}d ago` : " — never reviewed";
+    const ctxNote = ctx.loaded ? ` Schedule a focused 30-min session; prioritize active positions over watchlist.` : "";
+    return {
+      ticker: t.ticker,
+      headline: `${t.ticker} — ${t.daysOverdue ?? 0}d overdue`,
+      detail: `"${t.title}"${lastSeen}.${ctxNote}`,
+      severity: (t.daysOverdue ?? 0) > 30 ? "high" : "medium",
+    };
+  });
 
   if (reviewsDue.length === 0) {
     reviewsDue.push({
       ticker: null,
       headline: "All theses up to date",
-      detail: "No overdue thesis reviews.",
+      detail: `No overdue thesis reviews.${ctx.loaded ? " Good discipline — maintain quarterly review cadence." : ""}`,
       severity: "low",
     });
   }
@@ -436,6 +458,7 @@ async function generateReview(notes: string | null): Promise<PortfolioReviewReco
       mostUnderallocated:      JSON.stringify(mostUnderallocated),
       weakestThesis:           JSON.stringify(weakestThesis),
       reviewsDue:              JSON.stringify(reviewsDue),
+      brainContextReport:      ctx.loaded ? JSON.stringify(ctx) : null,
     },
   });
 
