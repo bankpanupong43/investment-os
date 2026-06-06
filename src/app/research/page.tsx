@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useMemo, useCallback } from "react";
-import type { ResearchDossierData } from "@/app/api/research/route";
+import type { ResearchDossierData, FactItem } from "@/app/api/research/route";
 import type { OpportunityEntry, OpportunityResult } from "@/app/api/opportunities/route";
 
 // ─── Strength / severity indicators ──────────────────────────────────────────
@@ -21,6 +21,185 @@ function SevBadge({ s }: { s: "high" | "medium" | "low" }) {
       style={{ backgroundColor: styles.bg, color: styles.text }}>
       {s}
     </span>
+  );
+}
+
+// ─── Evidence viewer ──────────────────────────────────────────────────────────
+
+const CAT_STYLE: Record<string, { bg: string; text: string }> = {
+  Fundamentals: { bg: "#EEF3FD", text: "#3E6AE1" },
+  Portfolio:    { bg: "#F0FDF4", text: "#15803D" },
+  Opportunity:  { bg: "#FFFBEB", text: "#D97706" },
+  BrainContext: { bg: "#FEF2F2", text: "#991B1B" },
+  Research:     { bg: "#F4F4F4", text: "#5C5E62" },
+};
+
+function EvidenceViewer({ d }: { d: ResearchDossierData }) {
+  const [tab, setTab] = useState<"facts" | "interpretation" | "recommendation">("facts");
+  const factById = useMemo(() => new Map((d.facts ?? []).map(f => [f.id, f])), [d.facts]);
+
+  const getMetrics = (ids: string[]) =>
+    ids.map(id => factById.get(id)?.metric).filter(Boolean).join(", ");
+
+  const dirColor = (dir: string) => dir === "positive" ? "#15803D" : dir === "negative" ? "#DC2626" : "#8E8E8E";
+  const dirSym = (dir: string) => dir === "positive" ? "+" : dir === "negative" ? "−" : "○";
+  const confColor = (c: string) => c === "high" ? "#15803D" : c === "medium" ? "#D97706" : "#DC2626";
+
+  const facts = d.facts ?? [];
+  const interps = d.interpretation ?? [];
+  const rec = d.recommendation;
+  const ev = d.evidenceSummary;
+
+  const EVTABS = [
+    { id: "facts" as const, label: `Facts (${facts.length})` },
+    { id: "interpretation" as const, label: `Interpretation (${interps.length})` },
+    { id: "recommendation" as const, label: "Recommendation" },
+  ];
+
+  return (
+    <div>
+      <div className="flex gap-1 mb-3">
+        {EVTABS.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className="text-[11px] font-medium px-2.5 py-1 rounded transition-colors"
+            style={tab === t.id ? { backgroundColor: "#3E6AE1", color: "white" } : { backgroundColor: "#F4F4F4", color: "#5C5E62" }}
+          >
+            {t.label}
+          </button>
+        ))}
+        {ev && (
+          <span className="ml-auto text-[10px] text-[#AAAAAA] self-center">
+            {ev.highConfidenceCount}/{ev.evidenceCount} high-conf
+            {ev.missingMetrics.length > 0 && ` · missing: ${ev.missingMetrics.join(", ")}`}
+          </span>
+        )}
+      </div>
+
+      {tab === "facts" && (
+        <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+          {facts.map((f: FactItem, i: number) => {
+            const cs = CAT_STYLE[f.category] ?? CAT_STYLE.Research;
+            return (
+              <div key={i} className="flex items-center gap-2 text-xs">
+                <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded shrink-0 w-24 text-center"
+                  style={{ backgroundColor: cs.bg, color: cs.text }}>
+                  {f.category}
+                </span>
+                <span className="font-medium text-[#171A20] w-36 truncate shrink-0">{f.metric}</span>
+                <span className="text-[#171A20] font-semibold">{f.value}</span>
+                <span className="text-[#AAAAAA] ml-auto text-[10px] truncate max-w-[140px]">{f.source}</span>
+                <span className="text-[10px] font-bold shrink-0" style={{ color: confColor(f.confidence) }}>
+                  {f.confidence[0].toUpperCase()}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === "interpretation" && (
+        <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+          {interps.length === 0 && <p className="text-xs text-[#8E8E8E]">No interpretations — regenerate the dossier to populate.</p>}
+          {interps.map((interp, i) => {
+            const metrics = interp.evidenceIds.map(id => factById.get(id)?.metric).filter(Boolean);
+            return (
+              <div key={i} className="flex gap-2.5">
+                <span className="text-base font-bold shrink-0 mt-0.5 w-4 text-center"
+                  style={{ color: dirColor(interp.direction) }}>
+                  {dirSym(interp.direction)}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-[#171A20]">{interp.claim}</div>
+                  <p className="text-[11px] text-[#5C5E62] mt-0.5 leading-snug">{interp.context}</p>
+                  {metrics.length > 0 && (
+                    <div className="flex gap-1 mt-1 flex-wrap">
+                      {metrics.map((m, j) => (
+                        <span key={j} className="text-[10px] px-1.5 py-0.5 rounded bg-[#F4F4F4] text-[#5C5E62]">{m}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === "recommendation" && (
+        <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+          {!rec?.positionAction && <p className="text-xs text-[#8E8E8E]">No recommendation — regenerate the dossier to populate.</p>}
+          {rec?.positionAction && (
+            <>
+              <div className="rounded-lg p-3" style={{ backgroundColor: "#F4F4F4" }}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-bold text-[#171A20] uppercase tracking-wide">
+                    {rec.positionAction} position
+                  </span>
+                  <span className="text-xs font-medium text-[#5C5E62]">Confidence {rec.confidence}/10</span>
+                </div>
+                <p className="text-xs text-[#5C5E62]">{rec.summary}</p>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-semibold text-[#8E8E8E] mb-1.5">Why Buy</div>
+                <div className="space-y-2">
+                  {rec.whyBuy.map((item, i) => {
+                    const metrics = item.evidenceIds.map(id => factById.get(id)?.metric).filter(Boolean);
+                    return (
+                      <div key={i} className="flex gap-2">
+                        <span className="font-bold text-[#15803D] shrink-0 mt-0.5">+</span>
+                        <div>
+                          <div className="text-xs text-[#171A20]">{item.reason}</div>
+                          {metrics.length > 0 && (
+                            <div className="flex gap-1 mt-0.5 flex-wrap">
+                              {metrics.map((m, j) => (
+                                <span key={j} className="text-[10px] px-1 py-0.5 rounded" style={{ backgroundColor: "#F0FDF4", color: "#15803D" }}>{m}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-semibold text-[#8E8E8E] mb-1.5">Risk Factors</div>
+                <div className="space-y-2">
+                  {rec.whyNotBuy.map((item, i) => {
+                    const metrics = item.evidenceIds.map(id => factById.get(id)?.metric).filter(Boolean);
+                    return (
+                      <div key={i} className="flex gap-2">
+                        <span className="font-bold text-[#DC2626] shrink-0 mt-0.5">−</span>
+                        <div>
+                          <div className="text-xs text-[#171A20]">{item.reason}</div>
+                          {metrics.length > 0 && (
+                            <div className="flex gap-1 mt-0.5 flex-wrap">
+                              {metrics.map((m, j) => (
+                                <span key={j} className="text-[10px] px-1 py-0.5 rounded" style={{ backgroundColor: "#FEF2F2", color: "#991B1B" }}>{m}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {ev && (
+                <div className="text-[11px] text-[#AAAAAA] pt-1 border-t border-[#EEEEEE]">
+                  {ev.evidenceCount} facts · {ev.supportingCount} supporting · {ev.contradictingCount} contradicting
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -209,6 +388,14 @@ function DossierCard({ d }: { d: ResearchDossierData }) {
             </div>
           </section>
 
+          {/* Evidence Viewer */}
+          {(d.facts?.length ?? 0) > 0 && (
+            <section>
+              <h3 className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide mb-3">Evidence · Facts / Interpretation / Recommendation</h3>
+              <EvidenceViewer d={d} />
+            </section>
+          )}
+
           {/* Suggested Allocation */}
           <section>
             <h3 className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide mb-2">Suggested Position Size</h3>
@@ -359,7 +546,10 @@ export default function ResearchPage() {
   );
 
   const convictionDossiers = useMemo(
-    () => [...dossiers].sort((a, b) => b.thesisDraft.confidence - a.thesisDraft.confidence),
+    () => [...dossiers].sort((a, b) =>
+      (b.recommendation?.confidence ?? b.thesisDraft.confidence) -
+      (a.recommendation?.confidence ?? a.thesisDraft.confidence)
+    ),
     [dossiers]
   );
 

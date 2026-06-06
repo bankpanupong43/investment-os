@@ -486,10 +486,38 @@ model ResearchDossier {
   portfolioFit        String   @default("{}") // JSON: PortfolioFit
   thesisDraft         String   @default("{}") // JSON: ThesisDraft
   suggestedAllocation String   @default("{}") // JSON: SuggestedAllocation
+  // Evidence layer (Phase 5D.5)
+  facts               String   @default("[]") // JSON: FactItem[]
+  interpretation      String   @default("[]") // JSON: InterpretationItem[]
+  recommendation      String   @default("{}") // JSON: RecommendationSection
+  evidenceSummary     String   @default("{}") // JSON: EvidenceSummary
   generatedAt         DateTime @default(now())
 
   @@index([opportunityScore])
   @@map("research_dossiers")
+}
+
+// ─── Evidence ─────────────────────────────────────────────────────────────────
+// Normalized fact store — one record per fact per dossier generation.
+// Enables querying evidence across tickers and auditing fact provenance.
+
+model Evidence {
+  id           String   @id @default(cuid())
+  ticker       String
+  factId       String   // matches FactItem.id in the dossier JSON (e.g. "MSFT_001")
+  category     String   // Fundamentals | Portfolio | Opportunity | BrainContext | Research
+  metric       String
+  value        String
+  numericValue Float?
+  unit         String?
+  source       String
+  sourceDate   String?
+  confidence   String   // high | medium | low
+  createdAt    DateTime @default(now())
+
+  @@index([ticker])
+  @@index([ticker, metric])
+  @@map("evidence")
 }
 
 // ─── OpportunityScore ────────────────────────────────────────────────────────

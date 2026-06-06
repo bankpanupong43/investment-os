@@ -180,6 +180,36 @@ function OpportunityCard({ entry }: { entry: OpportunityEntry }) {
             </div>
           </div>
 
+          {/* Supporting / contradicting factors */}
+          {((entry.supportingFactors?.length ?? 0) > 0 || (entry.contradictingFactors?.length ?? 0) > 0) && (
+            <div className="grid grid-cols-2 gap-3">
+              {(entry.supportingFactors?.length ?? 0) > 0 && (
+                <div>
+                  <div className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide mb-1.5">Supporting</div>
+                  <ul className="space-y-1">
+                    {(entry.supportingFactors ?? []).map((f, i) => (
+                      <li key={i} className="flex items-start gap-1.5 text-xs text-[#5C5E62]">
+                        <span className="text-[#15803D] font-bold shrink-0 mt-0.5">+</span>{f}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {(entry.contradictingFactors?.length ?? 0) > 0 && (
+                <div>
+                  <div className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide mb-1.5">Risks</div>
+                  <ul className="space-y-1">
+                    {(entry.contradictingFactors ?? []).map((f, i) => (
+                      <li key={i} className="flex items-start gap-1.5 text-xs text-[#5C5E62]">
+                        <span className="text-[#DC2626] font-bold shrink-0 mt-0.5">−</span>{f}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Suggested allocation */}
           <div>
             <div className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide mb-2">Suggested Position Size</div>

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { parseDossierRow } from "@/lib/dossier-engine";
 
-export type { ResearchDossierData } from "@/lib/dossier-engine";
+export type { ResearchDossierData, FactItem, InterpretationItem, RecommendationSection, EvidenceSummary } from "@/lib/dossier-engine";
 
 export async function GET(): Promise<NextResponse> {
   try {

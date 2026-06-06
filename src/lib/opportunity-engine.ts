@@ -67,6 +67,8 @@ export interface OpportunityEntry {
 
   reasoning: OpportunityReasoning;
   suggestedAllocation: SuggestedAllocation;
+  supportingFactors: string[];
+  contradictingFactors: string[];
 }
 
 export interface OpportunityResult {
@@ -305,6 +307,66 @@ function generateReasoning(
   return { whyBuy, whyNow, portfolioImpact, positionType };
 }
 
+// ─── Supporting / contradicting factors ───────────────────────────────────────
+
+function computeFactors(
+  inPortfolio: boolean,
+  inWatchlist: boolean,
+  sector: string | null,
+  assetType: string,
+  scores: {
+    companyScore: number;
+    allocationGapScore: number;
+    diversificationScore: number;
+    brainAlignmentScore: number;
+  },
+  f: {
+    roic: number | null;
+    grossMargin: number | null;
+    debtToEquity: number | null;
+    epsGrowth: number | null;
+    freeCashFlow: number | null;
+  } | null,
+  target: { targetPct: number; targetUsd: number } | null
+): { supportingFactors: string[]; contradictingFactors: string[] } {
+  const supporting: string[] = [];
+  const contradicting: string[] = [];
+
+  if (scores.companyScore >= 80) supporting.push(`Top-tier quality score (${scores.companyScore}/100)`);
+  else if (scores.companyScore >= 65) supporting.push(`Strong quality score (${scores.companyScore}/100)`);
+  else if (scores.companyScore < 45) contradicting.push(`Below-average quality (${scores.companyScore}/100)`);
+
+  if (scores.allocationGapScore >= 80) supporting.push(`${Math.round(scores.allocationGapScore)}% allocation gap — strong deployment priority`);
+  else if (scores.allocationGapScore >= 50) supporting.push("Partially deployed toward allocation target");
+  else if (scores.allocationGapScore === 0 && inPortfolio) contradicting.push("At or above allocation target");
+  else if (!inPortfolio && !target) contradicting.push("No allocation target defined");
+
+  if (inWatchlist) supporting.push("Pre-researched watchlist conviction");
+
+  if (scores.diversificationScore >= 75 && assetType !== "etf") {
+    supporting.push(`${sector ?? "Sector"} underrepresented in portfolio`);
+  }
+
+  if (scores.brainAlignmentScore >= 75) supporting.push(`Strong Brain OS alignment (${scores.brainAlignmentScore}/100)`);
+  else if (scores.brainAlignmentScore < 40 && assetType !== "etf") contradicting.push(`Weak Brain OS alignment (${scores.brainAlignmentScore}/100)`);
+
+  if (f) {
+    if (f.roic != null && f.roic >= 25) supporting.push(`Outstanding ROIC (${f.roic}%)`);
+    else if (f.roic != null && f.roic >= 10) supporting.push(`Quality ROIC (${f.roic}%)`);
+    else if (f.roic != null && f.roic < 10) contradicting.push(`ROIC below 10% threshold (${f.roic}%)`);
+
+    if (f.grossMargin != null && f.grossMargin >= 60) supporting.push(`High-margin business (${f.grossMargin}% gross margin)`);
+
+    if (f.debtToEquity != null && f.debtToEquity > 1) contradicting.push(`Elevated leverage (${f.debtToEquity}x D/E)`);
+    if (f.epsGrowth != null && f.epsGrowth < 0) contradicting.push(`Negative EPS growth (${f.epsGrowth}%)`);
+    if (f.freeCashFlow != null && f.freeCashFlow > 5000) {
+      supporting.push(`Substantial FCF ($${(f.freeCashFlow / 1000).toFixed(0)}B)`);
+    }
+  }
+
+  return { supportingFactors: supporting, contradictingFactors: contradicting };
+}
+
 // ─── Main engine ──────────────────────────────────────────────────────────────
 
 export async function computeOpportunities(): Promise<OpportunityResult> {
@@ -411,6 +473,16 @@ export async function computeOpportunities(): Promise<OpportunityResult> {
       totalCapitalUsd
     );
 
+    const { supportingFactors, contradictingFactors } = computeFactors(
+      inPortfolio,
+      inWatchlist,
+      u.sector,
+      u.assetType,
+      { companyScore, allocationGapScore, diversificationScore, brainAlignmentScore },
+      f ? { roic: f.roic, grossMargin: f.grossMargin, debtToEquity: f.debtToEquity, epsGrowth: f.epsGrowth, freeCashFlow: f.freeCashFlow } : null,
+      target ? { targetPct: target.targetPct, targetUsd: target.targetUsd } : null
+    );
+
     entries.push({
       ticker: u.ticker,
       companyName: u.companyName,
@@ -444,6 +516,8 @@ export async function computeOpportunities(): Promise<OpportunityResult> {
         : null,
       reasoning,
       suggestedAllocation,
+      supportingFactors,
+      contradictingFactors,
     });
   }
 

@@ -8,8 +8,16 @@
 import { db } from "./db";
 import { computeOpportunities, type OpportunityEntry } from "./opportunity-engine";
 import { fetchCompanyProfile, type FMPProfile } from "./fmp-client";
+import {
+  collectFacts, generateInterpretations, generateRecommendation, buildEvidenceSummary,
+  type FactItem, type InterpretationItem, type RecommendationSection, type EvidenceSummary,
+} from "./evidence-engine";
 import fs from "fs";
 import path from "path";
+
+// ─── Re-export evidence types for API routes ──────────────────────────────────
+
+export type { FactItem, InterpretationItem, RecommendationSection, EvidenceSummary } from "./evidence-engine";
 
 // ─── Exported types ────────────────────────────────────────────────────────────
 
@@ -87,6 +95,11 @@ export interface ResearchDossierData {
     maxPct: number;
     maxUsd: number;
   };
+  // Evidence layer (Phase 5D.5)
+  facts: FactItem[];
+  interpretation: InterpretationItem[];
+  recommendation: RecommendationSection;
+  evidenceSummary: EvidenceSummary;
 }
 
 // ─── Sector-specific content ───────────────────────────────────────────────────
@@ -574,6 +587,12 @@ export async function generateDossier(ticker: string, apiKey: string): Promise<R
     positionAction: entry.reasoning.positionType,
   };
 
+  // 5. Build evidence layer
+  const facts = collectFacts(entry);
+  const interpretation = generateInterpretations(facts, entry);
+  const recommendation = generateRecommendation(facts, interpretation, entry);
+  const evidenceSummary = buildEvidenceSummary(facts, interpretation, entry);
+
   return {
     ticker: entry.ticker,
     companyName: entry.companyName,
@@ -587,10 +606,21 @@ export async function generateDossier(ticker: string, apiKey: string): Promise<R
     portfolioFit,
     thesisDraft,
     suggestedAllocation: entry.suggestedAllocation,
+    facts,
+    interpretation,
+    recommendation,
+    evidenceSummary,
   };
 }
 
 export async function saveDossier(data: ResearchDossierData): Promise<void> {
+  const evidenceFields = {
+    facts: JSON.stringify(data.facts ?? []),
+    interpretation: JSON.stringify(data.interpretation ?? []),
+    recommendation: JSON.stringify(data.recommendation ?? {}),
+    evidenceSummary: JSON.stringify(data.evidenceSummary ?? {}),
+  };
+
   await db.researchDossier.upsert({
     where: { ticker: data.ticker },
     update: {
@@ -605,6 +635,7 @@ export async function saveDossier(data: ResearchDossierData): Promise<void> {
       thesisDraft: JSON.stringify(data.thesisDraft),
       suggestedAllocation: JSON.stringify(data.suggestedAllocation),
       generatedAt: new Date(),
+      ...evidenceFields,
     },
     create: {
       ticker: data.ticker,
@@ -618,14 +649,34 @@ export async function saveDossier(data: ResearchDossierData): Promise<void> {
       portfolioFit: JSON.stringify(data.portfolioFit),
       thesisDraft: JSON.stringify(data.thesisDraft),
       suggestedAllocation: JSON.stringify(data.suggestedAllocation),
+      ...evidenceFields,
     },
   });
+
+  // Persist evidence facts to the normalized Evidence table for queryability
+  if (data.facts && data.facts.length > 0) {
+    await db.evidence.createMany({
+      data: data.facts.map(f => ({
+        ticker: data.ticker,
+        factId: f.id,
+        category: f.category,
+        metric: f.metric,
+        value: f.value,
+        numericValue: f.numericValue,
+        unit: f.unit,
+        source: f.source,
+        sourceDate: f.sourceDate,
+        confidence: f.confidence,
+      })),
+    });
+  }
 }
 
 export function parseDossierRow(row: {
   id: string; ticker: string; companyName: string; opportunityScore: number; companyScore: number;
   investmentSummary: string; businessOverview: string; whyBuy: string;
   risks: string; portfolioFit: string; thesisDraft: string; suggestedAllocation: string;
+  facts?: string; interpretation?: string; recommendation?: string; evidenceSummary?: string;
   generatedAt: Date;
 }): ResearchDossierData {
   return {
@@ -641,6 +692,10 @@ export function parseDossierRow(row: {
     portfolioFit: JSON.parse(row.portfolioFit),
     thesisDraft: JSON.parse(row.thesisDraft),
     suggestedAllocation: JSON.parse(row.suggestedAllocation),
+    facts: JSON.parse(row.facts ?? "[]"),
+    interpretation: JSON.parse(row.interpretation ?? "[]"),
+    recommendation: JSON.parse(row.recommendation ?? "{}"),
+    evidenceSummary: JSON.parse(row.evidenceSummary ?? "{}"),
   };
 }
 
@@ -658,6 +713,12 @@ function dossiersToMarkdown(data: ResearchDossierData): string {
   const strengthIcon = (s: "strong" | "moderate" | "weak") => s === "strong" ? "🟢" : s === "moderate" ? "🟡" : "🔴";
   const sevIcon = (s: "high" | "medium" | "low") => s === "high" ? "🔴" : s === "medium" ? "🟡" : "🟢";
 
+  const ev = data.evidenceSummary;
+  const factById = new Map((data.facts ?? []).map(f => [f.id, f]));
+  const getMetrics = (ids: string[]) => ids.map(id => factById.get(id)?.metric).filter(Boolean).join(", ");
+
+  const dirSymbol = (d: string) => d === "positive" ? "+" : d === "negative" ? "−" : "○";
+
   return `---
 ticker: ${data.ticker}
 company: "${data.companyName}"
@@ -665,14 +726,14 @@ sector: ${is.sector ?? "Unknown"}
 tier: ${tierLabel}
 opportunity_score: ${data.opportunityScore}
 company_score: ${data.companyScore}
-confidence: ${td.confidence}/10
+confidence: ${data.recommendation?.confidence ?? td.confidence}/10
 generated: ${data.generatedAt.slice(0, 10)}
 tags: [research, ${is.sector?.toLowerCase().replace(/\s+/g, "-") ?? "equity"}, ${is.inWatchlist ? "watchlist" : "universe"}]
 ---
 
 # ${data.ticker} — Research Dossier
 
-> **Opportunity Score: ${data.opportunityScore}/100** | Company Score: ${data.companyScore}/100 | Confidence: ${td.confidence}/10
+> **Opportunity Score: ${data.opportunityScore}/100** | Company Score: ${data.companyScore}/100 | Confidence: ${data.recommendation?.confidence ?? td.confidence}/10
 
 ## Investment Summary
 
@@ -689,61 +750,35 @@ tags: [research, ${is.sector?.toLowerCase().replace(/\s+/g, "-") ?? "equity"}, $
 | Brain OS Alignment | ${is.brainAlignmentScore}/100 |
 | In Portfolio | ${is.inPortfolio ? "Yes" : "No"} |
 | On Watchlist | ${is.inWatchlist ? "Yes" : "No"} |
-| Suggested Action | **${is.positionAction === "initiate" ? "Initiate Position" : is.positionAction === "add" ? "Add to Position" : "Hold"}** |
+| Action | **${data.recommendation?.positionAction ?? is.positionAction}** |
 
-## Business Overview
+## Facts (${ev?.evidenceCount ?? 0} total — ${ev?.highConfidenceCount ?? 0} high confidence)
 
-${bo.description}
+${(data.facts ?? []).filter(f => f.category === "Fundamentals").map(f => `- **${f.metric}:** ${f.value} _(${f.source})_`).join("\n") || "_No fundamental data available_"}
 
-### Revenue Drivers
-${bo.revenueDrivers.map(d => `- ${d}`).join("\n")}
+### Portfolio Context
+${(data.facts ?? []).filter(f => f.category === "Portfolio" && f.numericValue != null).map(f => `- **${f.metric}:** ${f.value}`).join("\n") || "_No portfolio data_"}
 
-### Business Model
-${bo.businessModel}
+### Brain OS Criteria
+${(data.facts ?? []).filter(f => f.category === "BrainContext").map(f => `- **${f.metric}:** ${f.value}`).join("\n")}
 
-## Why Buy
+## Interpretation
 
-${whyBuy.map((r, i) => `### ${i + 1}. ${r.reason} ${strengthIcon(r.strength)}\n\n${r.evidence}`).join("\n\n")}
+${(data.interpretation ?? []).map(i => `### ${dirSymbol(i.direction)} ${i.claim}\n\n${i.context}\n\n_Evidence: ${getMetrics(i.evidenceIds) || "—"}_`).join("\n\n")}
 
-## Risks
+## Recommendation
 
-### Business Risks
-${risks.businessRisks.map(r => `- ${sevIcon(r.severity)} **[${r.severity.toUpperCase()}]** ${r.risk}`).join("\n")}
+**Action: ${data.recommendation?.positionAction?.toUpperCase() ?? "HOLD"} — Confidence ${data.recommendation?.confidence ?? td.confidence}/10**
 
-### Financial Risks
-${risks.financialRisks.map(r => `- ${sevIcon(r.severity)} **[${r.severity.toUpperCase()}]** ${r.risk}`).join("\n")}
+${data.recommendation?.summary ?? ""}
 
-### Portfolio Risks
-${risks.portfolioRisks.map(r => `- ${sevIcon(r.severity)} **[${r.severity.toUpperCase()}]** ${r.risk}`).join("\n")}
+### Why Buy
+${(data.recommendation?.whyBuy ?? []).map((r, i) => `${i + 1}. ${r.reason}\n   _Evidence: ${getMetrics(r.evidenceIds) || "—"}_`).join("\n")}
 
-## Portfolio Fit
+### Risk Factors
+${(data.recommendation?.whyNotBuy ?? []).map((r, i) => `${i + 1}. ${r.reason}\n   _Evidence: ${getMetrics(r.evidenceIds) || "—"}_`).join("\n")}
 
-${pf.summary}
-
-**Diversification Impact:** ${pf.diversificationImpact}
-
-**Allocation Impact:** ${pf.allocationImpact}
-
-${pf.relatedHoldings.length > 0 ? `**Related Holdings:** ${pf.relatedHoldings.join(", ")}` : ""}
-
-## Thesis Draft
-
-**Why Own:**
-${td.whyOwn}
-
-**Key Drivers:**
-${td.keyDrivers.map(d => `- ${d}`).join("\n")}
-
-**Risks:**
-${td.risks.map(r => `- ${r}`).join("\n")}
-
-**Kill Criteria:**
-${td.killCriteria.map(k => `- [ ] ${k}`).join("\n")}
-
-**Holding Period:** ${td.holdingPeriod}
-**Confidence:** ${td.confidence}/10
-
-## Suggested Position Sizing
+### Suggested Position Size
 
 | Position | % | USD |
 |---|---|---|
@@ -751,8 +786,22 @@ ${td.killCriteria.map(k => `- [ ] ${k}`).join("\n")}
 | Target | ${fmtPct(sa.targetPct)} | ${fmtUsd(sa.targetUsd)} |
 | Maximum | ${fmtPct(sa.maxPct)} | ${fmtUsd(sa.maxUsd)} |
 
+## Legacy Narrative Sections
+
+### Business Overview
+${bo.description}
+
+**Revenue Drivers:**
+${bo.revenueDrivers.map(d => `- ${d}`).join("\n")}
+
+### Thesis Draft
+${td.whyOwn}
+
+**Kill Criteria:**
+${td.killCriteria.map(k => `- [ ] ${k}`).join("\n")}
+
 ---
-*Generated by Investment OS on ${data.generatedAt.slice(0, 10)}*
+*Generated by Investment OS on ${data.generatedAt.slice(0, 10)} · ${ev?.evidenceCount ?? 0} facts · ${ev?.missingMetrics?.length ?? 0} missing metrics*
 `;
 }
 
