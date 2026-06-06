@@ -17,7 +17,8 @@
     "db:reset": "prisma migrate reset",
     "export:brain-os": "tsx scripts/export-to-brain-os.ts",
     "db:seed-universe": "tsx prisma/seed-universe.ts",
-    "validate:screener": "tsx scripts/validate-screener.ts"
+    "validate:screener": "tsx scripts/validate-screener.ts",
+    "validate:ingestion": "tsx scripts/validate-ingestion.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

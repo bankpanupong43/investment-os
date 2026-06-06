@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import type { ScreenerResult, ScoredEntry } from "@/app/api/screener/route";
+import type { CoverageReport, IngestionResult, UniverseIngestionSummary } from "@/app/api/ingestion/route";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -392,9 +393,313 @@ function AddEntryForm({ onAdded }: { onAdded: () => void }) {
   );
 }
 
+// ─── Ingestion Dashboard ──────────────────────────────────────────────────────
+
+const FIELD_LABELS: Record<string, string> = {
+  revenueGrowth: "Revenue Growth", epsGrowth: "EPS Growth",
+  grossMargin: "Gross Margin", operatingMargin: "Op. Margin",
+  freeCashFlow: "Free Cash Flow", debtToEquity: "Debt/Equity",
+  roic: "ROIC", sharesOutstanding: "Shares Out.",
+};
+
+const STATUS_DOT: Record<string, string> = {
+  success: "bg-[#2d7d46]", partial: "bg-[#b45309]",
+  failed: "bg-[#c0392b]", skipped: "bg-[#CCCCCC]",
+};
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 2) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function CoverageBar({ count, total }: { count: number; total: number }) {
+  const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+  const color = pct >= 80 ? "#2d7d46" : pct >= 50 ? "#b45309" : "#c0392b";
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex-1 h-1.5 bg-[#EEEEEE] rounded-full overflow-hidden">
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+      </div>
+      <span className="text-xs tabular-nums text-[#5C5E62] w-20 shrink-0">
+        {count}/{total} <span style={{ color }}>{pct}%</span>
+      </span>
+    </div>
+  );
+}
+
+function IngestionDashboard({ onRefreshComplete }: { onRefreshComplete: () => void }) {
+  const [report, setReport] = useState<(CoverageReport & { hasApiKey: boolean }) | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState<string | null>(null); // "universe" | ticker
+  const [lastResult, setLastResult] = useState<string | null>(null);
+
+  const loadReport = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/ingestion");
+      if (res.ok) setReport(await res.json());
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadReport(); }, [loadReport]);
+
+  async function triggerTicker(ticker: string) {
+    setRunning(ticker);
+    setLastResult(null);
+    try {
+      const res = await fetch("/api/ingestion", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "ticker", ticker }),
+      });
+      const r: IngestionResult = await res.json();
+      if (!res.ok) { setLastResult(`Error: ${(r as {error?: string}).error ?? "Failed"}`); return; }
+      setLastResult(`${ticker}: ${r.status} · ${r.fieldsUpdated.length} fields · ${r.durationMs}ms`);
+      await loadReport();
+      onRefreshComplete();
+    } finally {
+      setRunning(null);
+    }
+  }
+
+  async function triggerUniverse() {
+    setRunning("universe");
+    setLastResult(null);
+    try {
+      const res = await fetch("/api/ingestion", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "universe" }),
+      });
+      const r: UniverseIngestionSummary & { error?: string } = await res.json();
+      if (!res.ok) { setLastResult(`Error: ${r.error ?? "Failed"}`); return; }
+      setLastResult(`Universe: ${r.successCount} success · ${r.partialCount} partial · ${r.failedCount} failed · ${r.skippedCount} skipped · ${(r.totalMs / 1000).toFixed(1)}s`);
+      await loadReport();
+      onRefreshComplete();
+    } finally {
+      setRunning(null);
+    }
+  }
+
+  if (loading) return <div className="flex items-center justify-center h-48 text-sm text-[#8E8E8E]">Loading status…</div>;
+  if (!report) return <div className="bg-white border border-[#EEEEEE] rounded-xl p-8 text-center text-sm text-[#8E8E8E]">Failed to load ingestion status.</div>;
+
+  const equityTickers = report.tickerStatus.filter(t => t.assetType !== "etf");
+  const avgCoverage = Object.values(report.fieldCoverage).length > 0
+    ? Math.round(Object.values(report.fieldCoverage).reduce((s, v) => s + v.pct, 0) / Object.keys(report.fieldCoverage).length)
+    : 0;
+
+  return (
+    <div className="space-y-5">
+
+      {/* Control row */}
+      <div className="bg-white border border-[#EEEEEE] rounded-xl px-5 py-4 flex flex-wrap items-center gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${report.hasApiKey ? "bg-[#2d7d46]" : "bg-[#c0392b]"}`} />
+            <span className="text-sm font-medium text-[#171A20]">
+              {report.hasApiKey ? "FMP API Key configured" : "FMP API Key not set"}
+            </span>
+          </div>
+          <p className="text-xs text-[#8E8E8E]">
+            {report.hasApiKey
+              ? `Free tier: ~250 req/day. Universe refresh uses ${equityTickers.length * 3} calls.`
+              : "Add FMP_API_KEY to .env to enable live data ingestion. Free tier available at financialmodelingprep.com."}
+          </p>
+        </div>
+        <button
+          onClick={triggerUniverse}
+          disabled={!report.hasApiKey || running != null}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#3E6AE1] text-white text-xs font-medium hover:bg-[#2f55c7] disabled:opacity-40 transition-colors shrink-0"
+        >
+          {running === "universe" ? (
+            <>
+              <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              Refreshing…
+            </>
+          ) : (
+            <>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M23 4v6h-6M1 20v-6h6" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
+              Refresh Universe
+            </>
+          )}
+        </button>
+      </div>
+
+      {lastResult && (
+        <div className="bg-[#eef7f1] border border-[#c3e6cf] rounded-xl px-4 py-3 text-xs text-[#2d7d46] font-medium">{lastResult}</div>
+      )}
+
+      {/* Stats row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: "Equity Universe", value: report.equityCount, sub: "stocks (ETFs excluded)" },
+          { label: "With Fundamentals", value: report.withFundamentals, sub: `of ${report.equityCount} equities` },
+          { label: "Scored", value: report.withScores, sub: "with computed rankings" },
+          { label: "Avg Field Coverage", value: `${avgCoverage}%`, sub: "across 8 fundamental fields" },
+        ].map(({ label, value, sub }) => (
+          <div key={label} className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+            <div className="text-xs text-[#8E8E8E] font-medium mb-1">{label}</div>
+            <div className="text-2xl font-medium tabular-nums text-[#171A20]">{value}</div>
+            <div className="text-xs text-[#8E8E8E] mt-0.5">{sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-5">
+
+        {/* Field coverage */}
+        <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-[#EEEEEE]">
+            <span className="text-sm font-semibold text-[#171A20]">Field Coverage</span>
+            <span className="text-xs text-[#8E8E8E] ml-2">across {report.equityCount} equity tickers</span>
+          </div>
+          <div className="p-5 space-y-3">
+            {Object.entries(report.fieldCoverage).map(([field, { count, pct }]) => (
+              <div key={field}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-[#5C5E62]">{FIELD_LABELS[field] ?? field}</span>
+                </div>
+                <CoverageBar count={count} total={report.equityCount} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Recent logs */}
+        <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-[#EEEEEE]">
+            <span className="text-sm font-semibold text-[#171A20]">Recent Activity</span>
+          </div>
+          <div className="divide-y divide-[#EEEEEE] max-h-72 overflow-y-auto">
+            {report.recentLogs.length === 0 ? (
+              <div className="px-5 py-6 text-center text-sm text-[#8E8E8E]">No ingestion runs yet.</div>
+            ) : report.recentLogs.map(log => (
+              <div key={log.id} className="px-5 py-2.5 flex items-center gap-3">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT[log.status] ?? "bg-[#CCCCCC]"}`} />
+                <span className="font-mono text-xs font-semibold text-[#171A20] w-12 shrink-0">{log.ticker}</span>
+                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded capitalize ${
+                  log.status === "success" ? "bg-[#eef7f1] text-[#2d7d46]" :
+                  log.status === "partial" ? "bg-[#fffbeb] text-[#b45309]" :
+                  log.status === "failed" ? "bg-[#fdf0ee] text-[#c0392b]" :
+                  "bg-[#F4F4F4] text-[#8E8E8E]"
+                }`}>{log.status}</span>
+                {log.status !== "skipped" && (
+                  <span className="text-xs text-[#8E8E8E]">{log.fieldsUpdated.length}/8 fields</span>
+                )}
+                {log.errorMessage && (
+                  <span className="text-xs text-[#c0392b] truncate max-w-[120px]" title={log.errorMessage}>
+                    {log.errorMessage.split(".")[0]}
+                  </span>
+                )}
+                <span className="text-xs text-[#CCCCCC] ml-auto shrink-0">{timeAgo(log.createdAt)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Per-ticker status table */}
+      <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-[#EEEEEE]">
+          <span className="text-sm font-semibold text-[#171A20]">Ticker Coverage</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-[#F4F4F4] border-b border-[#EEEEEE]">
+              <tr>
+                <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[#8E8E8E]">Ticker</th>
+                <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[#8E8E8E]">Tier</th>
+                <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[#8E8E8E]">Last Run</th>
+                <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[#8E8E8E]">Status</th>
+                <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[#8E8E8E]">Fields</th>
+                <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[#8E8E8E]">Missing</th>
+                <th className="px-3 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wide text-[#8E8E8E]">Refresh</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#EEEEEE]">
+              {report.tickerStatus.map(t => (
+                <tr key={t.ticker} className="hover:bg-[#F9F9F9]">
+                  <td className="px-3 py-2.5">
+                    <div className="font-mono text-xs font-semibold text-[#171A20]">{t.ticker}</div>
+                    <div className="text-[10px] text-[#8E8E8E] truncate max-w-[120px]">{t.companyName}</div>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <TierBadge tier={t.universeTier} />
+                  </td>
+                  <td className="px-3 py-2.5 text-xs text-[#8E8E8E]">
+                    {t.lastIngested ? timeAgo(t.lastIngested) : <span className="text-[#CCCCCC]">Never</span>}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {t.assetType === "etf" ? (
+                      <span className="text-[10px] text-[#8E8E8E]">ETF — skipped</span>
+                    ) : t.lastStatus ? (
+                      <span className={`flex items-center gap-1 text-[10px] font-medium ${
+                        t.lastStatus === "success" ? "text-[#2d7d46]" :
+                        t.lastStatus === "partial" ? "text-[#b45309]" : "text-[#c0392b]"
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[t.lastStatus] ?? "bg-[#CCCCCC]"}`} />
+                        {t.lastStatus}
+                      </span>
+                    ) : <span className="text-[10px] text-[#CCCCCC]">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {t.assetType === "etf" ? (
+                      <span className="text-[10px] text-[#8E8E8E]">N/A</span>
+                    ) : (
+                      <span className={`text-xs font-medium tabular-nums ${t.fieldsPresent.length === 8 ? "text-[#2d7d46]" : t.fieldsPresent.length > 4 ? "text-[#b45309]" : "text-[#c0392b]"}`}>
+                        {t.fieldsPresent.length}/8
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {t.fieldsMissing.length > 0 ? (
+                      <span className="text-[10px] text-[#c0392b]" title={t.fieldsMissing.join(", ")}>
+                        {t.fieldsMissing.slice(0, 2).map(f => FIELD_LABELS[f]?.split(" ")[0] ?? f).join(", ")}
+                        {t.fieldsMissing.length > 2 && ` +${t.fieldsMissing.length - 2}`}
+                      </span>
+                    ) : t.assetType !== "etf" ? (
+                      <span className="text-[10px] text-[#2d7d46]">Complete</span>
+                    ) : null}
+                  </td>
+                  <td className="px-3 py-2.5 text-right">
+                    {t.assetType !== "etf" && (
+                      <button
+                        onClick={() => triggerTicker(t.ticker)}
+                        disabled={!report.hasApiKey || running != null}
+                        title={report.hasApiKey ? `Refresh ${t.ticker}` : "FMP_API_KEY required"}
+                        className="p-1 rounded hover:bg-[#EEF3FD] disabled:opacity-30 transition-colors text-[#3E6AE1]"
+                      >
+                        {running === t.ticker ? (
+                          <span className="w-3 h-3 border border-[#3E6AE1] border-t-transparent rounded-full animate-spin block" />
+                        ) : (
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <path d="M23 4v6h-6M1 20v-6h6" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                          </svg>
+                        )}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type Tab = "all" | "tier1" | "tier2" | "tier3" | "tier4" | "tier5" | "queue";
+type Tab = "all" | "tier1" | "tier2" | "tier3" | "tier4" | "tier5" | "queue" | "status";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "queue",  label: "Research Queue" },
@@ -404,6 +709,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "tier3",  label: "Small Cap" },
   { id: "tier4",  label: "ETFs" },
   { id: "tier5",  label: "International" },
+  { id: "status", label: "Data Status" },
 ];
 
 export default function ScreenerPage() {
@@ -474,11 +780,13 @@ export default function ScreenerPage() {
           </div>
         )}
 
-        {/* Filters */}
-        <FilterBar
-          filters={filters}
-          onChange={f => setFilters(f)}
-        />
+        {/* Filters — hidden on status tab */}
+        {tab !== "status" && (
+          <FilterBar
+            filters={filters}
+            onChange={f => setFilters(f)}
+          />
+        )}
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-[#EEEEEE] overflow-x-auto">
@@ -503,7 +811,9 @@ export default function ScreenerPage() {
         </div>
 
         {/* Content */}
-        {loading ? (
+        {tab === "status" ? (
+          <IngestionDashboard onRefreshComplete={load} />
+        ) : loading ? (
           <div className="flex items-center justify-center h-48 text-sm text-[#8E8E8E]">Loading universe…</div>
         ) : data ? (
           <div>
@@ -518,11 +828,6 @@ export default function ScreenerPage() {
             Failed to load universe data.
           </div>
         )}
-
-        {/* Architecture note */}
-        <div className="bg-[#FFFBEB] border border-[#FDE68A] rounded-xl px-5 py-4 text-xs text-[#b45309]">
-          <span className="font-semibold">Data Ingestion:</span> Universe data is manually managed or seeded. Full ingestion from SEC EDGAR, FMP, and Investor Relations pages is designed but not yet implemented. Fundamentals can be added via <code className="font-mono">PUT /api/universe/[ticker]/fundamentals</code>. Scores are computed via <code className="font-mono">POST /api/universe/[ticker]/score</code>.
-        </div>
 
       </div>
     </div>

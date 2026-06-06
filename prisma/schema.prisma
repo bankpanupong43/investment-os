@@ -466,6 +466,24 @@ model UniverseScore {
   @@map("universe_scores")
 }
 
+// ─── IngestionLog ─────────────────────────────────────────────────────────────
+// Audit trail for every data ingestion event (FMP, manual, seed).
+
+model IngestionLog {
+  id            String   @id @default(cuid())
+  ticker        String
+  source        String   // fmp | manual | seed
+  status        String   // success | partial | failed | skipped
+  fieldsUpdated String   @default("[]") // JSON: string[]
+  fieldsMissing String   @default("[]") // JSON: string[]
+  errorMessage  String?
+  apiCallCount  Int      @default(0)
+  durationMs    Int?
+  createdAt     DateTime @default(now())
+
+  @@map("ingestion_logs")
+}
+
 // ─── Brief ────────────────────────────────────────────────────────────────────
 
 model Brief {
