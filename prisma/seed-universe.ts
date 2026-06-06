@@ -11,7 +11,7 @@ const UNIVERSE_DATA = [
     fund: { grossMargin: 73.8, operatingMargin: 55.0, revenueGrowth: 122.4, epsGrowth: 400.0, debtToEquity: 0.38, roic: 95.2, freeCashFlow: 26000, sharesOutstanding: 24500 } },
   { ticker: "MSFT",  companyName: "Microsoft Corporation",      exchange: "NASDAQ", sector: "Technology",          industry: "Software",               marketCap: 3150000, universeTier: "tier1", country: "US", assetType: "equity",
     fund: { grossMargin: 70.1, operatingMargin: 45.2, revenueGrowth: 16.0, epsGrowth: 20.0, debtToEquity: 0.79, roic: 35.1, freeCashFlow: 70000, sharesOutstanding: 7440 } },
-  { ticker: "GOOG",  companyName: "Alphabet Inc. (Class C)",    exchange: "NASDAQ", sector: "Communication Svcs",  industry: "Internet Search",        marketCap: 2100000, universeTier: "tier1", country: "US", assetType: "equity",
+  { ticker: "GOOGL", companyName: "Alphabet Inc.",              exchange: "NASDAQ", sector: "Communication Svcs",  industry: "Internet Search",        marketCap: 2100000, universeTier: "tier1", country: "US", assetType: "equity",
     fund: { grossMargin: 58.1, operatingMargin: 32.3, revenueGrowth: 14.4, epsGrowth: 30.4, debtToEquity: 0.05, roic: 25.6, freeCashFlow: 60000, sharesOutstanding: 8550 } },
   { ticker: "AMZN",  companyName: "Amazon.com Inc.",            exchange: "NASDAQ", sector: "Consumer Discretionary", industry: "E-Commerce",          marketCap: 2200000, universeTier: "tier1", country: "US", assetType: "equity",
     fund: { grossMargin: 49.2, operatingMargin: 11.0, revenueGrowth: 12.0, epsGrowth: 150.0, debtToEquity: 0.68, roic: 18.2, freeCashFlow: 50000, sharesOutstanding: 10600 } },

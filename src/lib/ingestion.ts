@@ -50,11 +50,18 @@ export async function ingestTicker(ticker: string, apiKey: string): Promise<Inge
     const durationMs = Date.now() - start;
 
     const status: IngestionResult["status"] =
-      data.fieldsFound.length === 0 ? "failed" :
+      data.fieldsFound.length === 0 && data.fieldsExplicitNull.length === 0 ? "failed" :
       data.fieldsMissing.length > 0 ? "partial" : "success";
 
-    if (data.fieldsFound.length > 0) {
-      // Upsert fundamentals — only overwrite fields we received data for
+    if (data.fieldsFound.length > 0 || data.fieldsExplicitNull.length > 0) {
+      // Upsert fundamentals:
+      //   - fieldsFound: overwrite with live value
+      //   - fieldsExplicitNull: overwrite with null (e.g. non-USD FCF)
+      //   - fieldsMissing: preserve existing DB value (don't touch)
+      const xNull = new Set(data.fieldsExplicitNull);
+      const fieldUpdate = (val: number | null, name: string) =>
+        val != null ? { [name]: val } : xNull.has(name as never) ? { [name]: null } : {};
+
       await db.fundamental.upsert({
         where: { universeId: entry.id },
         create: {
@@ -69,14 +76,14 @@ export async function ingestTicker(ticker: string, apiKey: string): Promise<Inge
           sharesOutstanding: data.sharesOutstanding,
         },
         update: {
-          ...(data.revenueGrowth     != null && { revenueGrowth:     data.revenueGrowth }),
-          ...(data.epsGrowth         != null && { epsGrowth:         data.epsGrowth }),
-          ...(data.grossMargin       != null && { grossMargin:       data.grossMargin }),
-          ...(data.operatingMargin   != null && { operatingMargin:   data.operatingMargin }),
-          ...(data.freeCashFlow      != null && { freeCashFlow:      data.freeCashFlow }),
-          ...(data.debtToEquity      != null && { debtToEquity:      data.debtToEquity }),
-          ...(data.roic              != null && { roic:              data.roic }),
-          ...(data.sharesOutstanding != null && { sharesOutstanding: data.sharesOutstanding }),
+          ...fieldUpdate(data.revenueGrowth,     "revenueGrowth"),
+          ...fieldUpdate(data.epsGrowth,         "epsGrowth"),
+          ...fieldUpdate(data.grossMargin,        "grossMargin"),
+          ...fieldUpdate(data.operatingMargin,    "operatingMargin"),
+          ...fieldUpdate(data.freeCashFlow,       "freeCashFlow"),
+          ...fieldUpdate(data.debtToEquity,       "debtToEquity"),
+          ...fieldUpdate(data.roic,               "roic"),
+          ...fieldUpdate(data.sharesOutstanding,  "sharesOutstanding"),
         },
       });
 
