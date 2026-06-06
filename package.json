@@ -14,7 +14,8 @@
     "db:seed-targets": "tsx prisma/seed-targets.ts",
     "db:seed-theses": "tsx prisma/seed-theses.ts",
     "db:studio": "prisma studio",
-    "db:reset": "prisma migrate reset"
+    "db:reset": "prisma migrate reset",
+    "export:brain-os": "tsx scripts/export-to-brain-os.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
