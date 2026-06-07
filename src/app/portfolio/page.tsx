@@ -19,11 +19,13 @@ function Skeleton({ className = "" }: { className?: string }) {
   return <div className={`bg-[#EEEEEE] rounded-xl animate-pulse ${className}`} />;
 }
 
-type TabId = "holdings" | "allocation" | "reviews";
+type TabId = "holdings" | "allocation" | "performance" | "cashflows" | "reviews";
 const TABS: { id: TabId; label: string }[] = [
-  { id: "holdings",   label: "Holdings" },
-  { id: "allocation", label: "Allocation" },
-  { id: "reviews",    label: "Reviews" },
+  { id: "holdings",    label: "Holdings" },
+  { id: "allocation",  label: "Allocation" },
+  { id: "performance", label: "Performance" },
+  { id: "cashflows",   label: "Cash Flows" },
+  { id: "reviews",     label: "Reviews" },
 ];
 
 // ─── Holdings tab ─────────────────────────────────────────────────────────────
@@ -337,6 +339,330 @@ function ReviewsTab() {
   );
 }
 
+// ─── Performance tab ──────────────────────────────────────────────────────────
+
+interface PerfData {
+  currentValueUsd: number;
+  cashValueUsd: number;
+  investedValueUsd: number;
+  netDepositsUsd: number;
+  gainUsd: number;
+  totalReturnPct: number;
+  twrPct: number;
+  mwrPct: number | null;
+  inceptionDate: string | null;
+  snapshotCount: number;
+}
+
+interface Snapshot {
+  snapshotDate: string;
+  portfolioValueUsd: number;
+  netDepositsUsd: number;
+  unrealizedGainUsd: number;
+  totalReturnPct: number;
+  source: string;
+}
+
+function PerformanceTab() {
+  const [perf, setPerf] = useState<PerfData | null>(null);
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/performance").then(r => r.json()),
+      fetch("/api/portfolio-snapshots").then(r => r.json()),
+    ])
+      .then(([perf, snap]) => {
+        setPerf(perf);
+        setSnapshots((snap.snapshots ?? []).slice().reverse()); // newest first
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div className="py-12 text-center text-sm text-[#8E8E8E]">Loading performance…</div>;
+  if (error) return <div className="text-sm text-[#DC2626] py-4">{error}</div>;
+  if (!perf) return null;
+
+  const gainColor = perf.gainUsd >= 0 ? "#15803D" : "#DC2626";
+  const gainSign = perf.gainUsd >= 0 ? "+" : "";
+  const inceptionStr = perf.inceptionDate
+    ? new Date(perf.inceptionDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : "—";
+
+  return (
+    <div className="space-y-5">
+      {/* Since-inception hero */}
+      <div className="bg-[#F4F4F4] rounded-xl p-5">
+        <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest mb-3">
+          Since Inception {inceptionStr !== "—" ? `· ${inceptionStr}` : ""}
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div>
+            <div className="text-xs text-[#8E8E8E] mb-1">Net Deposits</div>
+            <div className="text-xl font-semibold text-[#171A20]">{fmt(perf.netDepositsUsd)}</div>
+            <div className="text-[11px] text-[#8E8E8E]">total contributed</div>
+          </div>
+          <div>
+            <div className="text-xs text-[#8E8E8E] mb-1">Current Value</div>
+            <div className="text-xl font-semibold text-[#171A20]">{fmt(perf.currentValueUsd)}</div>
+            <div className="text-[11px] text-[#8E8E8E]">portfolio mark-to-market</div>
+          </div>
+          <div>
+            <div className="text-xs text-[#8E8E8E] mb-1">Total Profit / Loss</div>
+            <div className="text-xl font-semibold" style={{ color: gainColor }}>
+              {gainSign}{fmt(perf.gainUsd)}
+            </div>
+            <div className="text-[11px] text-[#8E8E8E]">value − net deposits</div>
+          </div>
+          <div>
+            <div className="text-xs text-[#8E8E8E] mb-1">Total Return</div>
+            <div className="text-xl font-semibold" style={{ color: gainColor }}>
+              {gainSign}{perf.totalReturnPct.toFixed(2)}%
+            </div>
+            <div className="text-[11px] text-[#8E8E8E]">gain ÷ net deposits</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Return method breakdown */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+          <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest mb-2">Simple Return</div>
+          <div className="text-2xl font-semibold" style={{ color: gainColor }}>
+            {gainSign}{perf.totalReturnPct.toFixed(2)}%
+          </div>
+          <div className="text-xs text-[#8E8E8E] mt-1">gain ÷ net deposits — matches Excel</div>
+        </div>
+        <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+          <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest mb-2">TWR</div>
+          <div className="text-2xl font-semibold text-[#171A20]">
+            {perf.snapshotCount < 2 ? "—" : `${perf.twrPct >= 0 ? "+" : ""}${perf.twrPct.toFixed(2)}%`}
+          </div>
+          <div className="text-xs text-[#8E8E8E] mt-1">time-weighted · removes deposit timing</div>
+        </div>
+        <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+          <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest mb-2">MWR (XIRR)</div>
+          <div className="text-2xl font-semibold text-[#171A20]">
+            {perf.mwrPct == null ? "—" : `${perf.mwrPct >= 0 ? "+" : ""}${perf.mwrPct.toFixed(2)}%`}
+          </div>
+          <div className="text-xs text-[#8E8E8E] mt-1">money-weighted annualised IRR</div>
+        </div>
+      </div>
+
+      {/* Snapshot history table */}
+      {snapshots.length > 0 && (
+        <div>
+          <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide mb-2">
+            Snapshot History ({snapshots.length})
+          </div>
+          <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#EEEEEE] bg-[#F4F4F4] text-xs text-[#8E8E8E]">
+                  <th className="text-left px-4 py-2.5 font-medium">Date</th>
+                  <th className="text-right px-4 py-2.5 font-medium">Portfolio</th>
+                  <th className="text-right px-4 py-2.5 font-medium">Net Deposits</th>
+                  <th className="text-right px-4 py-2.5 font-medium">Gain</th>
+                  <th className="text-right px-4 py-2.5 font-medium">Return %</th>
+                  <th className="text-right px-4 py-2.5 font-medium hidden md:table-cell">Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {snapshots.map(s => {
+                  const ret = s.totalReturnPct;
+                  const retColor = ret >= 0 ? "#15803D" : "#DC2626";
+                  return (
+                    <tr key={s.snapshotDate} className="border-b border-[#EEEEEE] last:border-0">
+                      <td className="px-4 py-2.5 text-xs text-[#5C5E62]">
+                        {new Date(s.snapshotDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-medium text-[#171A20]">{fmt(s.portfolioValueUsd)}</td>
+                      <td className="px-4 py-2.5 text-right text-[#5C5E62]">{fmt(s.netDepositsUsd)}</td>
+                      <td className="px-4 py-2.5 text-right" style={{ color: s.unrealizedGainUsd >= 0 ? "#15803D" : "#DC2626" }}>
+                        {s.unrealizedGainUsd >= 0 ? "+" : ""}{fmt(s.unrealizedGainUsd)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-semibold" style={{ color: retColor }}>
+                        {ret >= 0 ? "+" : ""}{ret.toFixed(2)}%
+                      </td>
+                      <td className="px-4 py-2.5 text-right hidden md:table-cell">
+                        <span className="text-[10px] text-[#AAAAAA] bg-[#F4F4F4] px-1.5 py-0.5 rounded">{s.source}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {perf.snapshotCount === 0 && (
+        <div className="text-center py-8 text-sm text-[#8E8E8E]">
+          No snapshots yet. Run <code className="bg-[#F4F4F4] px-1.5 py-0.5 rounded">npm run import:excel-history</code> to import history,
+          or <code className="bg-[#F4F4F4] px-1.5 py-0.5 rounded">npm run snapshot:create</code> for today.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Cash Flows tab ───────────────────────────────────────────────────────────
+
+interface CashFlowRecord {
+  id: string;
+  date: string;
+  type: "deposit" | "withdrawal";
+  amountUsd: number;
+  note: string | null;
+  source: string;
+}
+
+function CashFlowsTab() {
+  const [flows, setFlows] = useState<CashFlowRecord[]>([]);
+  const [netDepositsUsd, setNetDepositsUsd] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), type: "deposit", amountUsd: "", note: "" });
+  const [showForm, setShowForm] = useState(false);
+
+  function loadFlows() {
+    return fetch("/api/cash-flows")
+      .then(r => r.json())
+      .then(d => { setFlows(d.flows ?? []); setNetDepositsUsd(d.netDepositsUsd ?? 0); });
+  }
+
+  useEffect(() => { loadFlows().catch(e => setError(e.message)).finally(() => setLoading(false)); }, []);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/cash-flows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, amountUsd: parseFloat(form.amountUsd) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed");
+      await loadFlows();
+      setForm({ date: new Date().toISOString().slice(0, 10), type: "deposit", amountUsd: "", note: "" });
+      setShowForm(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (loading) return <div className="py-12 text-center text-sm text-[#8E8E8E]">Loading cash flows…</div>;
+
+  const deposits = flows.filter(f => f.type === "deposit").reduce((s, f) => s + f.amountUsd, 0);
+  const withdrawals = flows.filter(f => f.type === "withdrawal").reduce((s, f) => s + f.amountUsd, 0);
+
+  return (
+    <div className="space-y-4">
+      {/* Summary */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+          <div className="text-xs text-[#8E8E8E] mb-1">Total Deposited</div>
+          <div className="text-lg font-semibold text-[#15803D]">{fmt(deposits)}</div>
+        </div>
+        <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+          <div className="text-xs text-[#8E8E8E] mb-1">Total Withdrawn</div>
+          <div className="text-lg font-semibold text-[#DC2626]">{fmt(withdrawals)}</div>
+        </div>
+        <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+          <div className="text-xs text-[#8E8E8E] mb-1">Net Deposits</div>
+          <div className="text-lg font-semibold text-[#171A20]">{fmt(netDepositsUsd)}</div>
+        </div>
+      </div>
+
+      {/* Add flow button + form */}
+      <div>
+        {!showForm && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setForm(f => ({ ...f, type: "deposit" })); setShowForm(true); }}
+              className="px-4 py-2 text-sm font-medium rounded-lg text-white bg-[#15803D] hover:bg-[#166534] transition-colors"
+            >
+              + Deposit
+            </button>
+            <button
+              onClick={() => { setForm(f => ({ ...f, type: "withdrawal" })); setShowForm(true); }}
+              className="px-4 py-2 text-sm font-medium rounded-lg border border-[#DC2626] text-[#DC2626] hover:bg-[#FEF2F2] transition-colors"
+            >
+              − Withdrawal
+            </button>
+          </div>
+        )}
+        {showForm && (
+          <form onSubmit={handleSubmit} className="bg-white border border-[#EEEEEE] rounded-xl p-4 space-y-3">
+            <div className="text-sm font-medium text-[#171A20] capitalize">{form.type}</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-[#8E8E8E] mb-1 block">Date</label>
+                <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                  required className="w-full px-3 py-2 text-sm border border-[#EEEEEE] rounded focus:outline-none focus:border-[#3E6AE1]" />
+              </div>
+              <div>
+                <label className="text-xs text-[#8E8E8E] mb-1 block">Amount (USD)</label>
+                <input type="number" step="0.01" min="0.01" value={form.amountUsd} onChange={e => setForm(f => ({ ...f, amountUsd: e.target.value }))}
+                  required placeholder="0.00" className="w-full px-3 py-2 text-sm border border-[#EEEEEE] rounded focus:outline-none focus:border-[#3E6AE1]" />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-[#8E8E8E] mb-1 block">Note (optional)</label>
+              <input type="text" value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))}
+                placeholder="e.g. Monthly contribution" className="w-full px-3 py-2 text-sm border border-[#EEEEEE] rounded focus:outline-none focus:border-[#3E6AE1]" />
+            </div>
+            {error && <div className="text-xs text-[#DC2626]">{error}</div>}
+            <div className="flex gap-2">
+              <button type="submit" disabled={submitting}
+                className="px-4 py-2 text-sm font-medium rounded-lg text-white bg-[#3E6AE1] disabled:opacity-60 transition-colors">
+                {submitting ? "Saving…" : "Save"}
+              </button>
+              <button type="button" onClick={() => setShowForm(false)}
+                className="px-4 py-2 text-sm font-medium rounded-lg border border-[#EEEEEE] text-[#5C5E62] hover:bg-[#F4F4F4] transition-colors">
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+
+      {/* Flow list */}
+      {flows.length === 0 ? (
+        <div className="text-center py-8 text-sm text-[#8E8E8E]">No cash flows recorded.</div>
+      ) : (
+        <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
+          {flows.map(f => (
+            <div key={f.id} className="flex items-center gap-3 px-4 py-3 border-b border-[#EEEEEE] last:border-0">
+              <div className={`w-2 h-2 rounded-full shrink-0 ${f.type === "deposit" ? "bg-[#15803D]" : "bg-[#DC2626]"}`} />
+              <div className="text-xs text-[#8E8E8E] w-24 shrink-0">
+                {new Date(f.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs text-[#5C5E62] truncate">{f.note ?? f.type}</div>
+              </div>
+              <div className={`text-sm font-semibold shrink-0 ${f.type === "deposit" ? "text-[#15803D]" : "text-[#DC2626]"}`}>
+                {f.type === "deposit" ? "+" : "−"}{fmt(f.amountUsd)}
+              </div>
+              {f.source !== "manual" && (
+                <span className="text-[10px] text-[#AAAAAA] bg-[#F4F4F4] px-1.5 py-0.5 rounded shrink-0">{f.source}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function PortfolioPage() {
@@ -346,7 +672,7 @@ export default function PortfolioPage() {
     <div className="max-w-4xl mx-auto py-8 px-4 md:px-6 space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-[#171A20]">Portfolio</h1>
-        <p className="text-xs text-[#8E8E8E] mt-0.5">Holdings · allocation targets · portfolio reviews</p>
+        <p className="text-xs text-[#8E8E8E] mt-0.5">Holdings · allocation · performance · cash flows · reviews</p>
       </div>
 
       {/* Tab bar */}
@@ -369,9 +695,11 @@ export default function PortfolioPage() {
         </div>
 
         <div className="p-4">
-          {tab === "holdings"   && <HoldingsTab />}
-          {tab === "allocation" && <AllocationTab />}
-          {tab === "reviews"    && <ReviewsTab />}
+          {tab === "holdings"    && <HoldingsTab />}
+          {tab === "allocation"  && <AllocationTab />}
+          {tab === "performance" && <PerformanceTab />}
+          {tab === "cashflows"   && <CashFlowsTab />}
+          {tab === "reviews"     && <ReviewsTab />}
         </div>
       </div>
     </div>

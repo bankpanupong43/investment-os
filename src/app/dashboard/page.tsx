@@ -126,6 +126,8 @@ export default function DashboardPage() {
   const [opportunities, setOpportunities] = useState<OpportunityEntry[]>([]);
   const [recentFilings, setRecentFilings] = useState<FilingSummary[]>([]);
   const [committeeAlerts, setCommitteeAlerts] = useState<CommitteeSummary[]>([]);
+  const [perfGainUsd, setPerfGainUsd] = useState<number | null>(null);
+  const [perfReturnPct, setPerfReturnPct] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -156,6 +158,11 @@ export default function DashboardPage() {
         s.conviction === "Strong Buy" || s.conviction === "Buy"
       );
       setCommitteeAlerts(alerts);
+    }).catch(() => {});
+
+    fetch("/api/performance").then(r => r.json()).then(d => {
+      setPerfGainUsd(d.gainUsd ?? null);
+      setPerfReturnPct(d.totalReturnPct ?? null);
     }).catch(() => {});
   }, []);
 
@@ -205,11 +212,17 @@ export default function DashboardPage() {
 
       {/* Quick-scan row — 30-second comprehension */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {/* Portfolio Value */}
-        <Link href="/portfolio" className="bg-white border border-[#EEEEEE] rounded-xl p-4 hover:border-[#3E6AE1] transition-colors">
+        {/* Portfolio Value + since-inception return */}
+        <Link href="/portfolio?tab=performance" className="bg-white border border-[#EEEEEE] rounded-xl p-4 hover:border-[#3E6AE1] transition-colors">
           <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest mb-2">Portfolio Value</div>
           <div className="text-xl font-semibold text-[#171A20]">{fmt(totalInvested)}</div>
-          <div className="text-xs text-[#8E8E8E] mt-1">{positions.filter(p => p.status === "active").length} positions</div>
+          {perfReturnPct != null ? (
+            <div className="text-xs mt-1" style={{ color: perfReturnPct >= 0 ? "#15803D" : "#DC2626" }}>
+              {perfReturnPct >= 0 ? "+" : ""}{perfReturnPct.toFixed(2)}% since inception
+            </div>
+          ) : (
+            <div className="text-xs text-[#8E8E8E] mt-1">{positions.filter(p => p.status === "active").length} positions</div>
+          )}
         </Link>
 
         {/* Top Opportunity */}
@@ -239,6 +252,38 @@ export default function DashboardPage() {
           <div className="text-xs text-[#8E8E8E] mt-1">{recentFilings[0] ? recentFilings[0].ticker + " · " + recentFilings[0].filingType : "none ingested"}</div>
         </Link>
       </div>
+
+      {/* Since Inception banner */}
+      {perfReturnPct != null && (
+        <Link
+          href="/portfolio?tab=performance"
+          className="block bg-white border border-[#EEEEEE] rounded-xl px-5 py-4 hover:border-[#3E6AE1] transition-colors"
+        >
+          <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest mb-3">Since Inception</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div>
+              <div className="text-xs text-[#8E8E8E]">Net Deposits</div>
+              <div className="text-base font-semibold text-[#171A20]">{fmt(totalInvested)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-[#8E8E8E]">Current Value</div>
+              <div className="text-base font-semibold text-[#171A20]">{fmt(totalInvested + (perfGainUsd ?? 0))}</div>
+            </div>
+            <div>
+              <div className="text-xs text-[#8E8E8E]">Total P&amp;L</div>
+              <div className="text-base font-semibold" style={{ color: (perfGainUsd ?? 0) >= 0 ? "#15803D" : "#DC2626" }}>
+                {(perfGainUsd ?? 0) >= 0 ? "+" : ""}{fmt(perfGainUsd)}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-[#8E8E8E]">Total Return</div>
+              <div className="text-base font-semibold" style={{ color: perfReturnPct >= 0 ? "#15803D" : "#DC2626" }}>
+                {perfReturnPct >= 0 ? "+" : ""}{perfReturnPct.toFixed(2)}%
+              </div>
+            </div>
+          </div>
+        </Link>
+      )}
 
       {/* Secondary metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

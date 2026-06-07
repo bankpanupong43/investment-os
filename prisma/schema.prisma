@@ -738,3 +738,41 @@ model ThesisReview {
 
   @@map("thesis_reviews")
 }
+
+// ─── CashFlow ─────────────────────────────────────────────────────────────────
+// Explicit deposit / withdrawal record. Net deposits = sum of all cash flows.
+// Source of truth for inception return calculation.
+
+model CashFlow {
+  id        String   @id @default(cuid())
+  date      DateTime
+  type      String   // "deposit" | "withdrawal"
+  amountUsd Float
+  note      String?
+  source    String   @default("manual") // "manual" | "import"
+  createdAt DateTime @default(now())
+
+  @@index([date])
+  @@map("cash_flows")
+}
+
+// ─── PortfolioSnapshot ────────────────────────────────────────────────────────
+// Periodic mark-to-market. Mirrors Sheet2 of the Excel workbook plus TWR support.
+// snapshotDate is unique — one snapshot per calendar day.
+
+model PortfolioSnapshot {
+  id               String   @id @default(cuid())
+  snapshotDate     DateTime @unique
+  portfolioValueUsd Float
+  cashValueUsd     Float    @default(0)
+  investedValueUsd Float    @default(0)
+  netDepositsUsd   Float
+  unrealizedGainUsd Float
+  totalReturnPct   Float    // simple: gain / netDeposits × 100
+  twrFactor        Float    @default(1.0) // sub-period return factor for TWR chain
+  source           String   @default("manual") // "manual" | "auto" | "import"
+  createdAt        DateTime @default(now())
+
+  @@index([snapshotDate])
+  @@map("portfolio_snapshots")
+}
