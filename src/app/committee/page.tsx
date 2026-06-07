@@ -710,36 +710,51 @@ export default function CommitteePage() {
           </div>
 
           {tab === "history" && (
-            <div className="space-y-2">
+            <div className="space-y-4">
               {sessions.length === 0 && (
                 <div className="text-center py-8 text-sm text-[#8E8E8E]">
                   No reviews yet. Open the Queue to start your first review.
                 </div>
               )}
-              {sessions.map(s => (
-                <button
-                  key={s.id}
-                  onClick={() => loadSessionDetail(s.id)}
-                  className={`w-full text-left bg-white border rounded p-3 transition-colors hover:border-[#3E6AE1] ${activeSession?.id === s.id ? "border-[#3E6AE1]" : "border-[#EEEEEE]"}`}
-                >
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <span className="font-semibold text-sm text-[#171A20]">{s.ticker}</span>
-                    <DecisionBadge d={s.conviction} />
-                  </div>
-                  <div className="text-xs text-[#5C5E62] truncate mb-1">{s.companyName}</div>
-                  <div className="flex items-center justify-between">
-                    <ConvictionBar level={s.convictionLevel} />
-                    <span className="text-[10px] text-[#8E8E8E]">
-                      {new Date(s.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                    </span>
-                  </div>
-                  <div className="mt-1.5 flex items-center gap-1 text-[10px]">
-                    <span className="text-[#22C55E]">▲ {s.bullScore}</span>
-                    <span className="text-[#8E8E8E]">vs</span>
-                    <span className="text-[#EF4444]">▼ {s.bearScore}</span>
-                  </div>
-                </button>
-              ))}
+              {(["Strong Buy", "Buy", "Watch", "Hold", "Pass"] as const)
+                .map(group => {
+                  const grouped = sessions.filter(s => s.conviction === group);
+                  if (grouped.length === 0) return null;
+                  return (
+                    <div key={group}>
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <DecisionBadge d={group} />
+                        <span className="text-[10px] text-[#AAAAAA]">{grouped.length}</span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {grouped.map(s => (
+                          <button
+                            key={s.id}
+                            onClick={() => loadSessionDetail(s.id)}
+                            className={`w-full text-left bg-white border rounded p-3 transition-colors hover:border-[#3E6AE1] ${activeSession?.id === s.id ? "border-[#3E6AE1]" : "border-[#EEEEEE]"}`}
+                          >
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <span className="font-semibold text-sm text-[#171A20]">{s.ticker}</span>
+                              <span className="text-[10px] text-[#8E8E8E]">
+                                {new Date(s.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                              </span>
+                            </div>
+                            <div className="text-xs text-[#5C5E62] truncate mb-1">{s.companyName}</div>
+                            <div className="flex items-center justify-between">
+                              <ConvictionBar level={s.convictionLevel} />
+                              <div className="flex items-center gap-1 text-[10px]">
+                                <span className="text-[#22C55E]">▲ {s.bullScore}</span>
+                                <span className="text-[#8E8E8E]">vs</span>
+                                <span className="text-[#EF4444]">▼ {s.bearScore}</span>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })
+              }
             </div>
           )}
 

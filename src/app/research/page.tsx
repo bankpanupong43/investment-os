@@ -498,13 +498,30 @@ const TABS: { id: TabId; label: string }[] = [
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+type HubTab = "dossiers" | "filings" | "earnings" | "universe";
+const HUB_TABS: { id: HubTab; label: string }[] = [
+  { id: "dossiers",  label: "Dossiers" },
+  { id: "filings",   label: "Filings" },
+  { id: "earnings",  label: "Earnings" },
+  { id: "universe",  label: "Universe" },
+];
+
+interface FilingRow { id: string; ticker: string; filingType: string; filingDate: string; description: string | null; thesisImpacts: { impactLevel: string }[] }
+interface EarningsRow { id: string; ticker: string; fiscalPeriod: string | null; reportDate: string; epsActual: number | null; epsEstimate: number | null; revenueActual: number | null }
+interface UniverseRow { ticker: string; companyName: string; universeTier: string; sector: string | null; totalScore: number }
+
 export default function ResearchPage() {
   const [dossiers, setDossiers] = useState<ResearchDossierData[]>([]);
   const [opportunities, setOpportunities] = useState<OpportunityEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hubTab, setHubTab] = useState<HubTab>("dossiers");
   const [activeTab, setActiveTab] = useState<TabId>("queue");
   const [generatingTickers, setGeneratingTickers] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [filings, setFilings] = useState<FilingRow[]>([]);
+  const [earnings, setEarnings] = useState<EarningsRow[]>([]);
+  const [universe, setUniverse] = useState<UniverseRow[]>([]);
+  const [hubLoading, setHubLoading] = useState<Record<HubTab, boolean>>({ dossiers: false, filings: false, earnings: false, universe: false });
 
   useEffect(() => {
     Promise.all([
@@ -518,6 +535,36 @@ export default function ResearchPage() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (hubTab === "filings" && filings.length === 0 && !hubLoading.filings) {
+      setHubLoading(p => ({ ...p, filings: true }));
+      fetch("/api/filings?limit=30")
+        .then(r => r.json())
+        .then(d => setFilings(d.filings ?? []))
+        .catch(() => {})
+        .finally(() => setHubLoading(p => ({ ...p, filings: false })));
+    }
+    if (hubTab === "earnings" && earnings.length === 0 && !hubLoading.earnings) {
+      setHubLoading(p => ({ ...p, earnings: true }));
+      fetch("/api/earnings?limit=30")
+        .then(r => r.json())
+        .then(d => setEarnings(Array.isArray(d) ? d : []))
+        .catch(() => {})
+        .finally(() => setHubLoading(p => ({ ...p, earnings: false })));
+    }
+    if (hubTab === "universe" && universe.length === 0 && !hubLoading.universe) {
+      setHubLoading(p => ({ ...p, universe: true }));
+      fetch("/api/screener")
+        .then(r => r.json())
+        .then(d => {
+          const rows = (d.scored ?? d.entries ?? []) as UniverseRow[];
+          setUniverse([...rows].sort((a, b) => b.totalScore - a.totalScore));
+        })
+        .catch(() => {})
+        .finally(() => setHubLoading(p => ({ ...p, universe: false })));
+    }
+  }, [hubTab, filings.length, earnings.length, universe.length, hubLoading]);
 
   const handleGenerate = useCallback(async (ticker: string) => {
     setGeneratingTickers(prev => new Set(prev).add(ticker));
@@ -571,50 +618,42 @@ export default function ResearchPage() {
     );
   }
 
+  const IMPACT_STYLE: Record<string, { bg: string; text: string }> = {
+    strengthened:           { bg: "#F0FDF4", text: "#15803D" },
+    intact:                 { bg: "#EEF3FD", text: "#3E6AE1" },
+    weakened:               { bg: "#FFFBEB", text: "#D97706" },
+    kill_criteria_triggered: { bg: "#FEF2F2", text: "#DC2626" },
+  };
+
   return (
     <div className="max-w-4xl mx-auto py-8 px-4 md:px-6 space-y-6">
 
       {/* Header */}
       <div>
-        <h1 className="text-xl font-semibold text-[#171A20]">Research Dossiers</h1>
+        <h1 className="text-xl font-semibold text-[#171A20]">Research</h1>
         <p className="text-xs text-[#8E8E8E] mt-0.5">
-          Structured investment research — from opportunity ranking to thesis draft
+          Research hub · dossiers · filings · earnings · universe
         </p>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: "Universe", value: opportunities.length },
-          { label: "Dossiers Generated", value: dossiers.length },
-          { label: "Watchlist Research", value: watchlistDossiers.length },
-          { label: "Pending Generation", value: queueEntries.filter(e => !dossierTickers.has(e.ticker)).length },
-        ].map(m => (
-          <div key={m.label} className="bg-white border border-[#EEEEEE] rounded-xl p-3">
-            <div className="text-xs text-[#8E8E8E] mb-1">{m.label}</div>
-            <div className="text-lg font-semibold text-[#171A20]">{m.value}</div>
-          </div>
-        ))}
       </div>
 
       {error && (
         <div className="text-sm text-[#DC2626] bg-[#FEF2F2] border border-[#FECACA] rounded-lg px-4 py-2">{error}</div>
       )}
 
-      {/* Tabs */}
+      {/* Hub tabs */}
       <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
         <div className="border-b border-[#EEEEEE] flex overflow-x-auto">
-          {TABS.map(tab => (
+          {HUB_TABS.map(ht => (
             <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className="shrink-0 px-4 py-3 text-sm font-medium border-b-2 transition-colors"
-              style={activeTab === tab.id
+              key={ht.id}
+              onClick={() => setHubTab(ht.id)}
+              className="shrink-0 px-5 py-3 text-sm font-medium border-b-2 transition-colors"
+              style={hubTab === ht.id
                 ? { borderColor: "#3E6AE1", color: "#3E6AE1" }
                 : { borderColor: "transparent", color: "#5C5E62" }}
             >
-              {tab.label}
-              {tab.id === "dossiers" && dossiers.length > 0 && (
+              {ht.label}
+              {ht.id === "dossiers" && dossiers.length > 0 && (
                 <span className="ml-1.5 text-[10px] bg-[#3E6AE1] text-white rounded-full px-1.5 py-0.5">
                   {dossiers.length}
                 </span>
@@ -624,74 +663,206 @@ export default function ResearchPage() {
         </div>
 
         <div className="p-4">
-          {/* Research Queue */}
-          {activeTab === "queue" && (
-            <div>
-              <p className="text-xs text-[#8E8E8E] mb-3">
-                {queueEntries.length} universe entries sorted by opportunity score. Click Generate to create a research dossier.
-              </p>
-              <div>
-                {queueEntries.map(entry => (
-                  <QueueRow
-                    key={entry.ticker}
-                    entry={entry}
-                    hasDossier={dossierTickers.has(entry.ticker)}
-                    onGenerate={handleGenerate}
-                    generating={generatingTickers.has(entry.ticker)}
-                  />
+          {/* ── Dossiers hub tab ── */}
+          {hubTab === "dossiers" && (
+            <div className="space-y-4">
+              {/* Stats */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label: "Universe", value: opportunities.length },
+                  { label: "Dossiers", value: dossiers.length },
+                  { label: "Watchlist", value: watchlistDossiers.length },
+                  { label: "Pending", value: queueEntries.filter(e => !dossierTickers.has(e.ticker)).length },
+                ].map(m => (
+                  <div key={m.label} className="bg-[#F4F4F4] rounded-xl p-3">
+                    <div className="text-xs text-[#8E8E8E] mb-1">{m.label}</div>
+                    <div className="text-lg font-semibold text-[#171A20]">{m.value}</div>
+                  </div>
                 ))}
               </div>
-            </div>
-          )}
 
-          {/* Generated Dossiers */}
-          {activeTab === "dossiers" && (
-            <div className="space-y-3">
-              {dossiers.length === 0 ? (
-                <div className="text-center py-12">
-                  <p className="text-sm text-[#8E8E8E]">No dossiers generated yet.</p>
-                  <p className="text-xs text-[#AAAAAA] mt-1">Go to Research Queue and click Generate on any entry.</p>
+              {/* Inner dossier tabs */}
+              <div className="border border-[#EEEEEE] rounded-xl overflow-hidden">
+                  <div className="border-b border-[#EEEEEE] flex overflow-x-auto bg-[#F4F4F4]">
+                    {TABS.map(tab => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className="shrink-0 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors"
+                        style={activeTab === tab.id
+                          ? { borderColor: "#3E6AE1", color: "#3E6AE1", backgroundColor: "white" }
+                          : { borderColor: "transparent", color: "#5C5E62", backgroundColor: "transparent" }}
+                      >
+                        {tab.label}
+                        {tab.id === "dossiers" && dossiers.length > 0 && (
+                          <span className="ml-1 text-[10px] bg-[#3E6AE1] text-white rounded-full px-1 py-0.5">{dossiers.length}</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="p-4">
+                    {activeTab === "queue" && (
+                      <div>
+                        <p className="text-xs text-[#8E8E8E] mb-3">
+                          {queueEntries.length} universe entries sorted by opportunity score. Click Generate to create a research dossier.
+                        </p>
+                        {queueEntries.map(entry => (
+                          <QueueRow key={entry.ticker} entry={entry} hasDossier={dossierTickers.has(entry.ticker)} onGenerate={handleGenerate} generating={generatingTickers.has(entry.ticker)} />
+                        ))}
+                      </div>
+                    )}
+                    {activeTab === "dossiers" && (
+                      <div className="space-y-3">
+                        {dossiers.length === 0 ? (
+                          <div className="text-center py-8"><p className="text-sm text-[#8E8E8E]">No dossiers yet. Go to Research Queue and click Generate.</p></div>
+                        ) : (
+                          dossiers.map(d => <DossierCard key={d.ticker} d={d} />)
+                        )}
+                      </div>
+                    )}
+                    {activeTab === "conviction" && (
+                      <div className="space-y-3">
+                        {convictionDossiers.length === 0 ? (
+                          <p className="text-sm text-[#8E8E8E] text-center py-8">Generate dossiers to see conviction rankings.</p>
+                        ) : (
+                          convictionDossiers.map(d => <DossierCard key={d.ticker} d={d} />)
+                        )}
+                      </div>
+                    )}
+                    {activeTab === "watchlist" && (
+                      <div className="space-y-3">
+                        {watchlistDossiers.length === 0 && watchlistQueue.length === 0 ? (
+                          <p className="text-sm text-[#8E8E8E] text-center py-8">No watchlist items in the universe.</p>
+                        ) : (
+                          <>
+                            {watchlistDossiers.map(d => <DossierCard key={d.ticker} d={d} />)}
+                            {watchlistQueue.length > 0 && (
+                              <div className="mt-4">
+                                <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide mb-2">Pending Research</div>
+                                {watchlistQueue.map(entry => (
+                                  <QueueRow key={entry.ticker} entry={entry} hasDossier={false} onGenerate={handleGenerate} generating={generatingTickers.has(entry.ticker)} />
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
+            </div>
+          )}
+
+          {/* ── Filings hub tab ── */}
+          {hubTab === "filings" && (
+            <div>
+              <p className="text-xs text-[#8E8E8E] mb-4">Recent SEC filings — most recent first. Use the Automation page to ingest new filings.</p>
+              {hubLoading.filings ? (
+                <div className="py-8 text-center text-sm text-[#8E8E8E]">Loading filings…</div>
+              ) : filings.length === 0 ? (
+                <div className="py-8 text-center text-sm text-[#8E8E8E]">No filings ingested yet.</div>
               ) : (
-                dossiers.map(d => <DossierCard key={d.ticker} d={d} />)
+                <div className="space-y-0">
+                  {filings.map(f => {
+                    const impact = f.thesisImpacts[0]?.impactLevel;
+                    const impStyle = impact ? (IMPACT_STYLE[impact] ?? IMPACT_STYLE.intact) : null;
+                    return (
+                      <div key={f.id} className="flex items-center gap-3 py-3 border-b border-[#EEEEEE] last:border-0">
+                        <div className="w-14 font-semibold text-[#171A20] shrink-0">{f.ticker}</div>
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#F4F4F4] text-[#5C5E62] shrink-0">{f.filingType}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs text-[#5C5E62] truncate">{f.description ?? f.filingType}</div>
+                          <div className="text-[10px] text-[#AAAAAA]">{new Date(f.filingDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
+                        </div>
+                        {impStyle && (
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0"
+                            style={{ backgroundColor: impStyle.bg, color: impStyle.text }}>
+                            {impact?.replace("_", " ")}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           )}
 
-          {/* Highest Conviction */}
-          {activeTab === "conviction" && (
-            <div className="space-y-3">
-              {convictionDossiers.length === 0 ? (
-                <p className="text-sm text-[#8E8E8E] text-center py-8">Generate dossiers to see conviction rankings.</p>
+          {/* ── Earnings hub tab ── */}
+          {hubTab === "earnings" && (
+            <div>
+              <p className="text-xs text-[#8E8E8E] mb-4">Recent earnings events — most recent first.</p>
+              {hubLoading.earnings ? (
+                <div className="py-8 text-center text-sm text-[#8E8E8E]">Loading earnings…</div>
+              ) : earnings.length === 0 ? (
+                <div className="py-8 text-center text-sm text-[#8E8E8E]">No earnings events recorded yet.</div>
               ) : (
-                convictionDossiers.map(d => <DossierCard key={d.ticker} d={d} />)
+                <div className="space-y-0">
+                  {earnings.map(e => {
+                    const beat = e.epsActual != null && e.epsEstimate != null
+                      ? e.epsActual >= e.epsEstimate ? "beat" : "miss"
+                      : null;
+                    const beatColor = beat === "beat" ? "#15803D" : beat === "miss" ? "#DC2626" : "#8E8E8E";
+                    return (
+                      <div key={e.id} className="flex items-center gap-3 py-3 border-b border-[#EEEEEE] last:border-0">
+                        <div className="w-14 font-semibold text-[#171A20] shrink-0">{e.ticker}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs text-[#5C5E62]">{e.fiscalPeriod ?? "—"}</div>
+                          <div className="text-[10px] text-[#AAAAAA]">{new Date(e.reportDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
+                        </div>
+                        {e.epsActual != null && (
+                          <div className="text-right shrink-0">
+                            <div className="text-sm font-semibold" style={{ color: beatColor }}>
+                              ${e.epsActual.toFixed(2)}
+                            </div>
+                            {e.epsEstimate != null && (
+                              <div className="text-[10px] text-[#AAAAAA]">est ${e.epsEstimate.toFixed(2)}</div>
+                            )}
+                          </div>
+                        )}
+                        {beat && (
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0"
+                            style={{ backgroundColor: beat === "beat" ? "#F0FDF4" : "#FEF2F2", color: beatColor }}>
+                            {beat}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           )}
 
-          {/* Watchlist Research */}
-          {activeTab === "watchlist" && (
-            <div className="space-y-3">
-              {watchlistDossiers.length === 0 && watchlistQueue.length === 0 ? (
-                <p className="text-sm text-[#8E8E8E] text-center py-8">No watchlist items in the universe.</p>
+          {/* ── Universe hub tab ── */}
+          {hubTab === "universe" && (
+            <div>
+              <p className="text-xs text-[#8E8E8E] mb-4">Full investment universe ranked by company score.</p>
+              {hubLoading.universe ? (
+                <div className="py-8 text-center text-sm text-[#8E8E8E]">Loading universe…</div>
+              ) : universe.length === 0 ? (
+                <div className="py-8 text-center text-sm text-[#8E8E8E]">Universe is empty.</div>
               ) : (
-                <>
-                  {watchlistDossiers.map(d => <DossierCard key={d.ticker} d={d} />)}
-                  {watchlistQueue.length > 0 && (
-                    <div className="mt-4">
-                      <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide mb-2">Pending Research</div>
-                      {watchlistQueue.map(entry => (
-                        <QueueRow
-                          key={entry.ticker}
-                          entry={entry}
-                          hasDossier={false}
-                          onGenerate={handleGenerate}
-                          generating={generatingTickers.has(entry.ticker)}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </>
+                <div className="space-y-0">
+                  {universe.map((u, i) => {
+                    const scoreColor = u.totalScore >= 75 ? "#15803D" : u.totalScore >= 55 ? "#3E6AE1" : "#D97706";
+                    const tierLabel: Record<string, string> = { tier1: "Large Cap", tier2: "Mid Cap", tier3: "Small Cap", tier4: "ETF", tier5: "Intl" };
+                    return (
+                      <div key={u.ticker} className="flex items-center gap-3 py-2.5 border-b border-[#EEEEEE] last:border-0">
+                        <div className="w-7 text-[11px] text-[#AAAAAA] text-right shrink-0">{i + 1}</div>
+                        <div className="w-14 font-semibold text-[#171A20] shrink-0">{u.ticker}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs text-[#5C5E62] truncate">{u.companyName}</div>
+                          <div className="text-[10px] text-[#AAAAAA]">{tierLabel[u.universeTier] ?? u.universeTier}{u.sector ? ` · ${u.sector}` : ""}</div>
+                        </div>
+                        <div className="text-sm font-bold shrink-0" style={{ color: scoreColor }}>
+                          {u.totalScore.toFixed(0)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           )}

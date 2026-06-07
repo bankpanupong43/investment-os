@@ -14,6 +14,8 @@
 import { db } from "./db";
 import { collectFacts, generateInterpretations } from "./evidence-engine";
 import type { FactItem, InterpretationItem } from "./evidence-engine";
+import { loadBrainContext } from "./brain-os-context";
+import type { InvestmentPhilosophyContext } from "./brain-os-context";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -383,7 +385,9 @@ function buildBearCase(
   filings: { id: string; filingType: string; filingDate: Date | string; thesisImpacts: { impactLevel: string; reasoning: string }[] }[],
   earnings: { id: string; fiscalPeriod: string | null; epsActual: number | null; epsEstimate: number | null }[],
   investmentThesis: { killCriteria: string } | null,
-  ticker: string
+  ticker: string,
+  sector: string | null = null,
+  geoPhilosophy: string[] = []
 ): BearCase {
   const negative = interpretations.filter(i => i.direction === "negative");
   const strongNeg = negative.filter(i => i.strength === "strong");
@@ -417,7 +421,7 @@ function buildBearCase(
     });
   }
 
-  const redFlags = buildRedFlags(facts, negative, filings, investmentThesis, earnings);
+  const redFlags = buildRedFlags(facts, negative, filings, investmentThesis, earnings, sector, geoPhilosophy);
   const failureScenarios = buildFailureScenarios(facts, filings, earnings, investmentThesis, ticker);
 
   const bearScore = Math.min(100,
@@ -436,7 +440,9 @@ function buildRedFlags(
   negativeInterps: InterpretationItem[],
   filings: { id: string; filingType: string; filingDate: Date | string; thesisImpacts: { impactLevel: string; reasoning: string }[] }[],
   investmentThesis: { killCriteria: string } | null,
-  earnings: { id: string; epsActual: number | null; epsEstimate: number | null }[]
+  earnings: { id: string; epsActual: number | null; epsEstimate: number | null }[],
+  sector: string | null = null,
+  geoPhilosophy: string[] = []
 ): RedFlag[] {
   const flags: RedFlag[] = [];
 
@@ -505,6 +511,18 @@ function buildRedFlags(
       severity: "high",
       evidenceIds: misses.map(e => e.id),
     });
+  }
+
+  // Geopolitical philosophy — note hedge positioning for defense/energy/commodities
+  if (geoPhilosophy.length > 0 && (sector === "Industrials" || sector === "Energy" || sector === "Materials")) {
+    const geoContext = geoPhilosophy.find(r => /hedge|minority|plausible/i.test(r)) ?? geoPhilosophy[0];
+    if (flags.length < 6) {
+      flags.push({
+        flag: `Geopolitical hedge note (philosophy): ${geoContext} Size as a minority hedge position — do not let it dominate the growth core.`,
+        severity: "medium",
+        evidenceIds: [],
+      });
+    }
   }
 
   if (flags.length === 0) {
@@ -594,12 +612,36 @@ function buildFailureScenarios(
 
 // ─── 3. Risk Manager ──────────────────────────────────────────────────────────
 
+function buildRiskRationale(
+  concentrationLevel: "high" | "medium" | "low",
+  suggestedPct: number,
+  sector: string | null,
+  projectedSectorPct: number,
+  targetPct: number,
+  philosophy: InvestmentPhilosophyContext | null
+): string {
+  const avoidConcentration = philosophy?.riskPhilosophy.find(r => /concentration|impair/i.test(r));
+  const catastrophicNote = avoidConcentration
+    ? ` Philosophy: ${avoidConcentration.toLowerCase().replace(/\.$/, "")}.`
+    : "";
+
+  if (concentrationLevel === "high") {
+    return `Reduced to ${suggestedPct}% (60% of target) — ${sector ?? "sector"} concentration would reach ${projectedSectorPct.toFixed(1)}% after entry.${catastrophicNote}`;
+  }
+
+  const riskNote = philosophy?.riskPhilosophy[0]
+    ? ` Philosophy context: ${philosophy.riskPhilosophy[0].toLowerCase().replace(/\.$/, "")}.`
+    : "";
+  return `Standard allocation: ${suggestedPct}% aligned with the investment plan (target: ${targetPct}%).${riskNote}`;
+}
+
 function buildRiskAssessment(
   ticker: string,
   sector: string | null,
   positions: { ticker: string; sector: string | null; currentValueUsd: number | null; allocationPct: number | null }[],
   allocationTarget: { targetPct: number; targetUsd: number } | null,
-  facts: FactItem[]
+  facts: FactItem[],
+  philosophy: InvestmentPhilosophyContext | null = null
 ): RiskAssessment {
   const totalUsd = positions.reduce((s, p) => s + (p.currentValueUsd ?? 0), 0);
   const sectorPeers = sector
@@ -638,9 +680,7 @@ function buildRiskAssessment(
       maxPct: Math.round(maxPct * 10) / 10,
       suggestedPct,
       starterPct,
-      rationale: concentrationLevel === "high"
-        ? `Reduced to ${suggestedPct}% (60% of target) — ${sector ?? "sector"} concentration would reach ${projectedSectorPct.toFixed(1)}% after entry`
-        : `Standard allocation: ${suggestedPct}% aligned with the investment plan (target: ${targetPct}%)`,
+      rationale: buildRiskRationale(concentrationLevel, suggestedPct, sector, projectedSectorPct, targetPct, philosophy),
     },
     concentrationRisk: {
       level: concentrationLevel,
@@ -726,7 +766,8 @@ function buildFinalDecision(
   thesisAudit: ThesisAudit,
   allocationTarget: { targetPct: number; targetUsd: number } | null,
   totalPortfolioUsd: number,
-  isInPortfolio: boolean
+  isInPortfolio: boolean,
+  philosophy: InvestmentPhilosophyContext | null = null
 ): FinalDecision {
   const auditPenalty = ((100 - thesisAudit.auditScore) / 100) * 15;
   const riskPenalty = (riskAssessment.portfolioRiskScore / 100) * 10;
@@ -765,7 +806,7 @@ function buildFinalDecision(
   const suggestedPct = riskAssessment.positionSizeRecommendation.suggestedPct;
   const suggestedUsd = Math.round((suggestedPct / 100) * totalPortfolioUsd);
 
-  const summaryReasoning = buildSummaryReasoning(recommendation, bullCase, bearCase, riskAssessment, thesisAudit, bullScore, bearScore);
+  const summaryReasoning = buildSummaryReasoning(recommendation, bullCase, bearCase, riskAssessment, thesisAudit, bullScore, bearScore, philosophy);
 
   const keyRisksAcknowledged = bearCase.redFlags.slice(0, 3).map(f => f.flag.length > 90 ? f.flag.slice(0, 90) + "..." : f.flag);
 
@@ -796,15 +837,21 @@ function buildSummaryReasoning(
   risk: RiskAssessment,
   audit: ThesisAudit,
   bull: number,
-  bear: number
+  bear: number,
+  philosophy: InvestmentPhilosophyContext | null = null
 ): string {
   const topDriver = bullCase.keyDrivers[0]?.driver ?? "fundamental strength";
   const topRisk = bearCase.redFlags[0]?.flag ?? "valuation risk";
+
+  const frameworkNote = philosophy?.decisionFramework.length
+    ? ` Decision framework: ${philosophy.decisionFramework.slice(0, 2).map(d => d.criterion).join(", ")}.`
+    : "";
+
   switch (rec) {
     case "Strong Buy":
-      return `Strong Buy — Bull score ${bull} significantly outweighs Bear score ${bear}. Primary driver: ${topDriver.slice(0, 80)}. Risk Manager approves up to ${risk.positionSizeRecommendation.maxPct}% position. Evidence is ${audit.overallVerdict}. Start at ${risk.positionSizeRecommendation.starterPct}%, scale to ${risk.positionSizeRecommendation.suggestedPct}% on confirmation.`;
+      return `Strong Buy — Bull score ${bull} significantly outweighs Bear score ${bear}. Primary driver: ${topDriver.slice(0, 80)}. Risk Manager approves up to ${risk.positionSizeRecommendation.maxPct}% position. Evidence is ${audit.overallVerdict}. Start at ${risk.positionSizeRecommendation.starterPct}%, scale to ${risk.positionSizeRecommendation.suggestedPct}% on confirmation.${frameworkNote}`;
     case "Buy":
-      return `Buy — Evidence favors initiation (Bull ${bull}, Bear ${bear}). Primary driver: ${topDriver.slice(0, 70)}. Key risk to monitor: ${topRisk.slice(0, 60)}. Initiate at ${risk.positionSizeRecommendation.starterPct}% starter and scale to ${risk.positionSizeRecommendation.suggestedPct}% as thesis confirms.`;
+      return `Buy — Evidence favors initiation (Bull ${bull}, Bear ${bear}). Primary driver: ${topDriver.slice(0, 70)}. Key risk to monitor: ${topRisk.slice(0, 60)}. Initiate at ${risk.positionSizeRecommendation.starterPct}% starter and scale to ${risk.positionSizeRecommendation.suggestedPct}% as thesis confirms.${frameworkNote}`;
     case "Watch":
       return `Watch — Committee signals are balanced (Bull ${bull}, Bear ${bear}). ${audit.overallVerdict === "evidence-gaps" ? "Evidence gaps prevent high-conviction initiation — gather fundamental data first." : "Thesis is interesting but risk/reward is not yet compelling enough to act."}`;
     case "Hold":
@@ -834,11 +881,15 @@ export async function runCommitteeSession(ticker: string): Promise<CommitteeSess
   const totalPortfolioUsd = positions.reduce((s, p) => s + ((p as any).currentValueUsd ?? 0), 0);
   const isInPortfolio = positions.some(p => p.ticker === upper);
 
+  const brainCtx = loadBrainContext();
+  const philosophy = brainCtx.investmentPhilosophy;
+  const geoPhilosophy = philosophy?.geopoliticalPhilosophy ?? [];
+
   const bullCase = buildBullCase(facts, interpretations, filings as any[], earnings as any[], upper);
-  const bearCase = buildBearCase(facts, interpretations, filings as any[], earnings as any[], investmentThesis, upper);
-  const riskAssessment = buildRiskAssessment(upper, universe.sector, positions as any[], allocationTarget, facts);
+  const bearCase = buildBearCase(facts, interpretations, filings as any[], earnings as any[], investmentThesis, upper, universe.sector, geoPhilosophy);
+  const riskAssessment = buildRiskAssessment(upper, universe.sector, positions as any[], allocationTarget, facts, philosophy);
   const thesisAudit = buildThesisAudit(bullCase, bearCase, facts);
-  const finalDecision = buildFinalDecision(bullCase, bearCase, riskAssessment, thesisAudit, allocationTarget, totalPortfolioUsd, isInPortfolio);
+  const finalDecision = buildFinalDecision(bullCase, bearCase, riskAssessment, thesisAudit, allocationTarget, totalPortfolioUsd, isInPortfolio, philosophy);
 
   return {
     ticker: upper,

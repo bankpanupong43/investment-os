@@ -18,6 +18,7 @@
     "export:brain-os": "tsx scripts/export-to-brain-os.ts",
     "db:seed-universe": "tsx prisma/seed-universe.ts",
     "validate:screener": "tsx scripts/validate-screener.ts",
+    "validate:philosophy": "tsx scripts/validate-investment-philosophy.ts",
     "validate:ingestion": "tsx scripts/validate-ingestion.ts",
     "refresh:universe": "tsx scripts/run-universe-refresh.ts",
     "validate:opportunities": "tsx scripts/validate-opportunities.ts",

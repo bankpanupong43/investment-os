@@ -2,6 +2,25 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+interface OpportunityEntry {
+  ticker: string;
+  companyName: string;
+  objectiveScore: number;
+  recommendation: string;
+}
+
+interface FilingSummary {
+  id: string;
+  ticker: string;
+  filingType: string;
+  filingDate: string;
+}
+
+interface CommitteeSummary {
+  ticker: string;
+  conviction: string;
+}
+
 interface Position {
   id: string;
   ticker: string;
@@ -104,6 +123,9 @@ export default function DashboardPage() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [journal, setJournal] = useState<JournalEntry[]>([]);
   const [theses, setTheses] = useState<InvestmentThesisItem[]>([]);
+  const [opportunities, setOpportunities] = useState<OpportunityEntry[]>([]);
+  const [recentFilings, setRecentFilings] = useState<FilingSummary[]>([]);
+  const [committeeAlerts, setCommitteeAlerts] = useState<CommitteeSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -118,6 +140,23 @@ export default function DashboardPage() {
         setTheses(Array.isArray(thy?.theses) ? thy.theses : []);
       })
       .finally(() => setLoading(false));
+
+    // Quick-scan supplementary data — non-blocking
+    fetch("/api/opportunities").then(r => r.json()).then(d => {
+      const entries: OpportunityEntry[] = (d.entries ?? []).slice(0, 5);
+      setOpportunities(entries);
+    }).catch(() => {});
+
+    fetch("/api/filings?limit=5").then(r => r.json()).then(d => {
+      setRecentFilings(d.filings ?? d ?? []);
+    }).catch(() => {});
+
+    fetch("/api/committee").then(r => r.json()).then(d => {
+      const alerts: CommitteeSummary[] = (d.sessions ?? []).filter((s: CommitteeSummary) =>
+        s.conviction === "Strong Buy" || s.conviction === "Buy"
+      );
+      setCommitteeAlerts(alerts);
+    }).catch(() => {});
   }, []);
 
   const totalInvested = positions.reduce((s, p) => s + (positionCostBasis(p) ?? 0), 0);
@@ -159,26 +198,54 @@ export default function DashboardPage() {
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-7xl">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-medium text-[#171A20]">Portfolio Dashboard</h1>
-          <p className="text-[#8E8E8E] text-sm mt-0.5">{today}</p>
-        </div>
-        <Link
-          href="/holdings"
-          style={{ transition: "background-color 0.33s" }}
-          className="shrink-0 bg-[#3E6AE1] hover:bg-[#2d5bc7] text-white px-5 py-2 rounded text-sm font-medium"
-        >
-          View Holdings
+      <div>
+        <h1 className="text-2xl font-medium text-[#171A20]">Dashboard</h1>
+        <p className="text-[#8E8E8E] text-sm mt-0.5">{today}</p>
+      </div>
+
+      {/* Quick-scan row — 30-second comprehension */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* Portfolio Value */}
+        <Link href="/portfolio" className="bg-white border border-[#EEEEEE] rounded-xl p-4 hover:border-[#3E6AE1] transition-colors">
+          <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest mb-2">Portfolio Value</div>
+          <div className="text-xl font-semibold text-[#171A20]">{fmt(totalInvested)}</div>
+          <div className="text-xs text-[#8E8E8E] mt-1">{positions.filter(p => p.status === "active").length} positions</div>
+        </Link>
+
+        {/* Top Opportunity */}
+        <Link href="/opportunities" className="bg-white border border-[#EEEEEE] rounded-xl p-4 hover:border-[#3E6AE1] transition-colors">
+          <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest mb-2">Top Opportunity</div>
+          {opportunities[0] ? (
+            <>
+              <div className="text-xl font-semibold text-[#171A20]">{opportunities[0].ticker}</div>
+              <div className="text-xs text-[#8E8E8E] mt-1">score {opportunities[0].objectiveScore.toFixed(0)} · {opportunities[0].recommendation}</div>
+            </>
+          ) : (
+            <div className="text-xl font-semibold text-[#8E8E8E]">—</div>
+          )}
+        </Link>
+
+        {/* Committee Alerts */}
+        <Link href="/committee" className={`bg-white border rounded-xl p-4 hover:border-[#3E6AE1] transition-colors ${committeeAlerts.length > 0 ? "border-[#86EFAC]" : "border-[#EEEEEE]"}`}>
+          <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest mb-2">Committee Alerts</div>
+          <div className={`text-xl font-semibold ${committeeAlerts.length > 0 ? "text-[#14532D]" : "text-[#171A20]"}`}>{committeeAlerts.length}</div>
+          <div className="text-xs text-[#8E8E8E] mt-1">{committeeAlerts.length > 0 ? "Strong Buy / Buy" : "no action signals"}</div>
+        </Link>
+
+        {/* New Filings */}
+        <Link href="/research" className="bg-white border border-[#EEEEEE] rounded-xl p-4 hover:border-[#3E6AE1] transition-colors">
+          <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest mb-2">New Filings</div>
+          <div className="text-xl font-semibold text-[#171A20]">{recentFilings.length}</div>
+          <div className="text-xs text-[#8E8E8E] mt-1">{recentFilings[0] ? recentFilings[0].ticker + " · " + recentFilings[0].filingType : "none ingested"}</div>
         </Link>
       </div>
 
-      {/* Metric Cards */}
+      {/* Secondary metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard label="Total Invested" value={fmt(totalInvested)} sub={`${positions.length} active position${positions.length !== 1 ? "s" : ""}`} />
-        <MetricCard label="Entry Confidence" value={positionsWithThesis.length ? `${avgConfidence.toFixed(1)} / 10` : "—"} sub={positionsWithThesis.length ? `${positionsWithThesis.length} position${positionsWithThesis.length !== 1 ? "s" : ""} with thesis` : "no theses yet"} />
+        <MetricCard label="Entry Confidence" value={positionsWithThesis.length ? `${avgConfidence.toFixed(1)} / 10` : "—"} sub={positionsWithThesis.length ? `${positionsWithThesis.length} with thesis` : "no theses yet"} />
         <MetricCard label="Pending Actions" value={String(allRecs.length)} sub="awaiting review" highlight={allRecs.length > 2} />
         <MetricCard label="Triggered Stops" value={String(triggeredKills)} sub="kill conditions hit" highlight={triggeredKills > 0} />
+        <MetricCard label="Reviews Overdue" value={String(thesesOverdue.length)} sub="thesis reviews due" highlight={thesesOverdue.length > 0} />
       </div>
 
       {/* Thesis Health */}
@@ -281,7 +348,7 @@ export default function DashboardPage() {
           <div className="px-5 py-4 border-b border-[#EEEEEE] flex items-center justify-between">
             <h2 className="font-medium text-[#171A20] text-sm">Holdings</h2>
             <Link
-              href="/holdings"
+              href="/portfolio"
               style={{ transition: "color 0.33s" }}
               className="text-[#3E6AE1] hover:text-[#2d5bc7] text-sm font-medium"
             >

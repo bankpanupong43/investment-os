@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { computeOpportunities, saveOpportunityScores } from "@/lib/opportunity-engine";
 
-export type { OpportunityEntry, OpportunityResult } from "@/lib/opportunity-engine";
+export type {
+  OpportunityEntry,
+  OpportunityResult,
+  DisagreementOpportunity,
+  AgreementOpportunity,
+  PreferenceProfile,
+} from "@/lib/opportunity-engine";
 
 // GET /api/opportunities — compute fresh (no save)
 export async function GET(): Promise<NextResponse> {

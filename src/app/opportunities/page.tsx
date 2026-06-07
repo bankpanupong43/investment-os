@@ -1,17 +1,13 @@
 "use client";
-import { useEffect, useState, useMemo } from "react";
-import type { OpportunityEntry, OpportunityResult } from "@/app/api/opportunities/route";
+import { useEffect, useState, useMemo, useCallback } from "react";
+import type { OpportunityEntry, OpportunityResult, DisagreementOpportunity, AgreementOpportunity } from "@/app/api/opportunities/route";
+import type { FeedbackType } from "@/app/api/feedback/route";
 
 // ─── Tier badge ───────────────────────────────────────────────────────────────
 
 const TIER_LABELS: Record<string, string> = {
-  tier1: "Large Cap",
-  tier2: "Mid Cap",
-  tier3: "Small Cap",
-  tier4: "ETF",
-  tier5: "Intl",
+  tier1: "Large Cap", tier2: "Mid Cap", tier3: "Small Cap", tier4: "ETF", tier5: "Intl",
 };
-
 const TIER_COLORS: Record<string, { bg: string; text: string }> = {
   tier1: { bg: "#EEF3FD", text: "#3E6AE1" },
   tier2: { bg: "#F0FDF4", text: "#15803D" },
@@ -23,10 +19,8 @@ const TIER_COLORS: Record<string, { bg: string; text: string }> = {
 function TierBadge({ tier }: { tier: string }) {
   const c = TIER_COLORS[tier] ?? { bg: "#F4F4F4", text: "#5C5E62" };
   return (
-    <span
-      className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded"
-      style={{ backgroundColor: c.bg, color: c.text }}
-    >
+    <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded"
+      style={{ backgroundColor: c.bg, color: c.text }}>
       {TIER_LABELS[tier] ?? tier}
     </span>
   );
@@ -39,14 +33,50 @@ function ScoreBar({ label, score, weight, color = "#3E6AE1" }: { label: string; 
     <div>
       <div className="flex items-center justify-between mb-1">
         <span className="text-[11px] text-[#5C5E62]">{label}</span>
-        <span className="text-[11px] font-medium text-[#171A20]">{score.toFixed(0)} <span className="text-[#AAAAAA]">({weight}%)</span></span>
+        <span className="text-[11px] font-medium text-[#171A20]">
+          {score.toFixed(0)} <span className="text-[#AAAAAA]">({weight}%)</span>
+        </span>
       </div>
       <div className="h-1.5 bg-[#EEEEEE] rounded-full overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all"
-          style={{ width: `${Math.min(100, score)}%`, backgroundColor: color }}
-        />
+        <div className="h-full rounded-full transition-all"
+          style={{ width: `${Math.min(100, score)}%`, backgroundColor: color }} />
       </div>
+    </div>
+  );
+}
+
+// ─── Preference bar ───────────────────────────────────────────────────────────
+
+function PreferenceBar({ score, label }: { score: number; label: string }) {
+  const color = score >= 70 ? "#15803D" : score >= 45 ? "#8E8E8E" : "#DC2626";
+  const width = score;
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[11px] text-[#5C5E62]">User preference</span>
+        <span className="text-[11px] font-medium" style={{ color }}>
+          {score}/100 · {label}
+        </span>
+      </div>
+      <div className="h-1.5 bg-[#EEEEEE] rounded-full overflow-hidden">
+        <div className="h-full rounded-full transition-all"
+          style={{ width: `${width}%`, backgroundColor: color }} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Confidence pips ──────────────────────────────────────────────────────────
+
+function ConfidencePips({ confidence }: { confidence: number }) {
+  const color = confidence >= 8 ? "#15803D" : confidence >= 5 ? "#D97706" : "#DC2626";
+  return (
+    <div className="flex items-center gap-0.5" title={`Confidence: ${confidence}/10`}>
+      {Array.from({ length: 10 }, (_, i) => (
+        <div key={i} className="w-1 h-2 rounded-sm"
+          style={{ backgroundColor: i < confidence ? color : "#EEEEEE" }} />
+      ))}
+      <span className="text-[10px] ml-1" style={{ color }}>{confidence}/10</span>
     </div>
   );
 }
@@ -64,32 +94,98 @@ function AllocationBox({ label, pct, usd }: { label: string; pct: number; usd: n
   );
 }
 
+// ─── Feedback strip ───────────────────────────────────────────────────────────
+
+const FEEDBACK_OPTIONS: { type: FeedbackType; label: string; activeColor: string }[] = [
+  { type: "interested",     label: "Interested",  activeColor: "#15803D" },
+  { type: "researching",    label: "Researching", activeColor: "#3E6AE1" },
+  { type: "not_interested", label: "Not for me",  activeColor: "#8E8E8E" },
+  { type: "disagree",       label: "Disagree",    activeColor: "#DC2626" },
+];
+
+const PREFERENCE_LABELS: Record<string, string> = {
+  interested:     "Interested",
+  researching:    "Researching",
+  already_owned:  "Already owned",
+  not_interested: "Not for me",
+  disagree:       "Disagree",
+};
+
+function FeedbackStrip({ ticker, currentFeedback, onFeedback }: {
+  ticker: string;
+  currentFeedback: string | null;
+  onFeedback: (ticker: string, type: FeedbackType) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  async function submit(type: FeedbackType) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker, feedbackType: type }),
+      });
+      onFeedback(ticker, type);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-1 flex-wrap">
+      <span className="text-[10px] text-[#AAAAAA] mr-0.5">Your signal:</span>
+      {FEEDBACK_OPTIONS.map(opt => {
+        const isActive = currentFeedback === opt.type;
+        return (
+          <button key={opt.type}
+            onClick={e => { e.stopPropagation(); submit(opt.type); }}
+            disabled={busy}
+            className="text-[11px] font-medium px-2 py-1 rounded border transition-all"
+            style={
+              isActive
+                ? { backgroundColor: opt.activeColor, color: "#fff", borderColor: opt.activeColor }
+                : { backgroundColor: "#F4F4F4", color: "#5C5E62", borderColor: "#EEEEEE" }
+            }>
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Opportunity card ─────────────────────────────────────────────────────────
 
-function OpportunityCard({ entry }: { entry: OpportunityEntry }) {
+function OpportunityCard({ entry, onFeedback }: {
+  entry: OpportunityEntry;
+  onFeedback: (ticker: string, type: FeedbackType) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [researchState, setResearchState] = useState<"idle" | "generating" | "done">("idle");
-  const scoreColor = entry.opportunityScore >= 75 ? "#2d7d46" : entry.opportunityScore >= 55 ? "#3E6AE1" : "#D97706";
+  const scoreColor = entry.objectiveScore >= 75 ? "#2d7d46" : entry.objectiveScore >= 55 ? "#3E6AE1" : "#D97706";
 
   async function handleGenerateResearch(e: React.MouseEvent) {
     e.stopPropagation();
     setResearchState("generating");
     try {
       const res = await fetch(`/api/research/${entry.ticker}/generate`, { method: "POST" });
-      if (res.ok) setResearchState("done");
-      else setResearchState("idle");
+      setResearchState(res.ok ? "done" : "idle");
     } catch {
       setResearchState("idle");
     }
   }
 
+  const prefLabel = entry.userFeedback ? PREFERENCE_LABELS[entry.userFeedback] : null;
+  const prefBadgeStyle = !entry.userFeedback ? null
+    : entry.userFeedback === "disagree"      ? { bg: "#FEF2F2", text: "#DC2626" }
+    : entry.userFeedback === "not_interested" ? { bg: "#F4F4F4", text: "#8E8E8E" }
+    : { bg: "#F0FDF4", text: "#15803D" };
+
   return (
     <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
-      {/* Header row */}
-      <button
-        className="w-full text-left p-4"
-        onClick={() => setExpanded(e => !e)}
-      >
+      <button className="w-full text-left p-4" onClick={() => setExpanded(e => !e)}>
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -97,14 +193,16 @@ function OpportunityCard({ entry }: { entry: OpportunityEntry }) {
               <TierBadge tier={entry.universeTier} />
               {entry.inPortfolio && (
                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
-                  style={{ backgroundColor: "#F0FDF4", color: "#15803D" }}>
-                  In Portfolio
-                </span>
+                  style={{ backgroundColor: "#F0FDF4", color: "#15803D" }}>In Portfolio</span>
               )}
               {entry.inWatchlist && (
                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
-                  style={{ backgroundColor: "#EEF3FD", color: "#3E6AE1" }}>
-                  Watchlist
+                  style={{ backgroundColor: "#EEF3FD", color: "#3E6AE1" }}>Watchlist</span>
+              )}
+              {prefBadgeStyle && (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                  style={{ backgroundColor: prefBadgeStyle.bg, color: prefBadgeStyle.text }}>
+                  {prefLabel}
                 </span>
               )}
             </div>
@@ -116,44 +214,76 @@ function OpportunityCard({ entry }: { entry: OpportunityEntry }) {
           <div className="flex items-center gap-3 shrink-0">
             <div className="text-right">
               <div className="text-2xl font-bold" style={{ color: scoreColor }}>
-                {entry.opportunityScore.toFixed(1)}
+                {entry.objectiveScore.toFixed(1)}
               </div>
-              <div className="text-[10px] text-[#AAAAAA] leading-none">/ 100</div>
+              <div className="text-[10px] text-[#AAAAAA] leading-none">objective</div>
             </div>
-            <svg
-              width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#AAAAAA" strokeWidth="2"
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#AAAAAA" strokeWidth="2"
               strokeLinecap="round" strokeLinejoin="round"
-              style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}
-            >
+              style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>
               <polyline points="6 9 12 15 18 9" />
             </svg>
           </div>
         </div>
       </button>
 
-      {/* Expanded detail */}
       {expanded && (
         <div className="border-t border-[#EEEEEE] p-4 space-y-4">
-          {/* Score breakdown */}
+
+          {/* Objective Drivers */}
           <div className="space-y-2">
-            <div className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide">Score Breakdown</div>
-            <ScoreBar label="Company Quality" score={entry.companyScore} weight={40} color="#3E6AE1" />
-            <ScoreBar label="Allocation Gap" score={entry.allocationGapScore} weight={25} color="#16A34A" />
+            <div className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide">
+              Objective Drivers
+              <span className="ml-1.5 normal-case font-normal text-[#AAAAAA]">· AI-only · feedback has no effect on these</span>
+            </div>
+            <ScoreBar label="Company Quality" score={entry.companyScore} weight={50} color="#3E6AE1" />
+            <ScoreBar label="Allocation Gap" score={entry.allocationGapScore} weight={15} color="#16A34A" />
             <ScoreBar label="Diversification" score={entry.diversificationScore} weight={15} color="#7C3AED" />
             <ScoreBar label="Watchlist Signal" score={entry.watchlistScore} weight={10} color="#D97706" />
             <ScoreBar label="Brain OS Alignment" score={entry.brainAlignmentScore} weight={10} color="#DC2626" />
           </div>
 
-          {/* Fundamentals */}
+          {/* Preference Signal — clearly separated */}
+          <div className="bg-[#F4F4F4] rounded-lg p-3 space-y-2">
+            <div className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide">
+              Your Preference Signal
+              <span className="ml-1.5 normal-case font-normal text-[#AAAAAA]">· visible only · does not change rank</span>
+            </div>
+            <PreferenceBar
+              score={entry.preferenceScore}
+              label={entry.userFeedback ? PREFERENCE_LABELS[entry.userFeedback] : "No signal yet"}
+            />
+            <FeedbackStrip ticker={entry.ticker} currentFeedback={entry.userFeedback} onFeedback={onFeedback} />
+          </div>
+
+          {/* Confidence */}
+          <div>
+            <div className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide mb-1.5">
+              Data Confidence
+              <span className="ml-1.5 normal-case font-normal text-[#AAAAAA]">· based on data completeness only</span>
+            </div>
+            <ConfidencePips confidence={entry.confidence} />
+            {entry.uncertaintyFactors.length > 0 && (
+              <ul className="mt-1.5 space-y-0.5">
+                {entry.uncertaintyFactors.map((f, i) => (
+                  <li key={i} className="text-[11px] text-[#D97706] flex items-start gap-1">
+                    <span className="shrink-0 mt-0.5">⚠</span>{f}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Key Metrics */}
           {entry.fundamentals && (
             <div>
               <div className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide mb-2">Key Metrics</div>
               <div className="grid grid-cols-4 gap-2 text-center">
                 {[
-                  { label: "ROIC", value: entry.fundamentals.roic != null ? `${entry.fundamentals.roic.toFixed(1)}%` : "—" },
+                  { label: "ROIC",   value: entry.fundamentals.roic != null ? `${entry.fundamentals.roic.toFixed(1)}%` : "—" },
                   { label: "Gross M", value: entry.fundamentals.grossMargin != null ? `${entry.fundamentals.grossMargin.toFixed(1)}%` : "—" },
-                  { label: "Rev G", value: entry.fundamentals.revenueGrowth != null ? `${entry.fundamentals.revenueGrowth.toFixed(1)}%` : "—" },
-                  { label: "D/E", value: entry.fundamentals.debtToEquity != null ? entry.fundamentals.debtToEquity.toFixed(2) : "—" },
+                  { label: "Rev G",  value: entry.fundamentals.revenueGrowth != null ? `${entry.fundamentals.revenueGrowth.toFixed(1)}%` : "—" },
+                  { label: "D/E",    value: entry.fundamentals.debtToEquity != null ? entry.fundamentals.debtToEquity.toFixed(2) : "—" },
                 ].map(m => (
                   <div key={m.label} className="bg-[#F4F4F4] rounded-lg p-2">
                     <div className="text-[10px] text-[#8E8E8E]">{m.label}</div>
@@ -180,14 +310,14 @@ function OpportunityCard({ entry }: { entry: OpportunityEntry }) {
             </div>
           </div>
 
-          {/* Supporting / contradicting factors */}
+          {/* Supporting / contradicting */}
           {((entry.supportingFactors?.length ?? 0) > 0 || (entry.contradictingFactors?.length ?? 0) > 0) && (
             <div className="grid grid-cols-2 gap-3">
               {(entry.supportingFactors?.length ?? 0) > 0 && (
                 <div>
                   <div className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide mb-1.5">Supporting</div>
                   <ul className="space-y-1">
-                    {(entry.supportingFactors ?? []).map((f, i) => (
+                    {entry.supportingFactors.map((f, i) => (
                       <li key={i} className="flex items-start gap-1.5 text-xs text-[#5C5E62]">
                         <span className="text-[#15803D] font-bold shrink-0 mt-0.5">+</span>{f}
                       </li>
@@ -199,7 +329,7 @@ function OpportunityCard({ entry }: { entry: OpportunityEntry }) {
                 <div>
                   <div className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide mb-1.5">Risks</div>
                   <ul className="space-y-1">
-                    {(entry.contradictingFactors ?? []).map((f, i) => (
+                    {entry.contradictingFactors.map((f, i) => (
                       <li key={i} className="flex items-start gap-1.5 text-xs text-[#5C5E62]">
                         <span className="text-[#DC2626] font-bold shrink-0 mt-0.5">−</span>{f}
                       </li>
@@ -221,48 +351,33 @@ function OpportunityCard({ entry }: { entry: OpportunityEntry }) {
             {entry.currentValue?.usd != null && (
               <div className="mt-2 text-xs text-[#8E8E8E] text-center">
                 Current: ${entry.currentValue.usd.toLocaleString("en-US", { maximumFractionDigits: 0 })}
-                {entry.allocationTarget && (
-                  <> · Target: ${entry.allocationTarget.targetUsd.toLocaleString("en-US", { maximumFractionDigits: 0 })}</>
-                )}
+                {entry.allocationTarget && <> · Target: ${entry.allocationTarget.targetUsd.toLocaleString("en-US", { maximumFractionDigits: 0 })}</>}
               </div>
             )}
           </div>
 
-          {/* Action badge + Generate Research */}
+          {/* Action + Generate Research */}
           <div className="flex items-center gap-2 flex-wrap">
-            <span
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg"
+            <span className="text-xs font-semibold px-3 py-1.5 rounded-lg"
               style={
-                entry.reasoning.positionType === "initiate"
-                  ? { backgroundColor: "#EEF3FD", color: "#3E6AE1" }
-                  : entry.reasoning.positionType === "add"
-                  ? { backgroundColor: "#F0FDF4", color: "#15803D" }
-                  : { backgroundColor: "#F4F4F4", color: "#5C5E62" }
-              }
-            >
-              {entry.reasoning.positionType === "initiate"
-                ? "Initiate Position"
-                : entry.reasoning.positionType === "add"
-                ? "Add to Position"
+                entry.reasoning.positionType === "initiate" ? { backgroundColor: "#EEF3FD", color: "#3E6AE1" }
+                : entry.reasoning.positionType === "add"    ? { backgroundColor: "#F0FDF4", color: "#15803D" }
+                : { backgroundColor: "#F4F4F4", color: "#5C5E62" }
+              }>
+              {entry.reasoning.positionType === "initiate" ? "Initiate Position"
+                : entry.reasoning.positionType === "add" ? "Add to Position"
                 : "Hold — no immediate action"}
             </span>
-            {entry.sector && (
-              <span className="text-xs text-[#AAAAAA]">{entry.sector}</span>
-            )}
+            {entry.sector && <span className="text-xs text-[#AAAAAA]">{entry.sector}</span>}
             <div className="ml-auto">
               {researchState === "done" ? (
-                <a
-                  href="/research"
-                  className="text-xs font-medium px-3 py-1.5 rounded border border-[#BBF7D0] text-[#15803D] hover:bg-[#F0FDF4] transition-colors"
-                >
+                <a href="/research"
+                  className="text-xs font-medium px-3 py-1.5 rounded border border-[#BBF7D0] text-[#15803D] hover:bg-[#F0FDF4] transition-colors">
                   View Dossier →
                 </a>
               ) : (
-                <button
-                  onClick={handleGenerateResearch}
-                  disabled={researchState === "generating"}
-                  className="text-xs font-medium px-3 py-1.5 rounded border border-[#EEEEEE] text-[#5C5E62] hover:border-[#3E6AE1] hover:text-[#3E6AE1] transition-colors disabled:opacity-50"
-                >
+                <button onClick={handleGenerateResearch} disabled={researchState === "generating"}
+                  className="text-xs font-medium px-3 py-1.5 rounded border border-[#EEEEEE] text-[#5C5E62] hover:border-[#3E6AE1] hover:text-[#3E6AE1] transition-colors disabled:opacity-50">
                   {researchState === "generating" ? "Generating…" : "Generate Research"}
                 </button>
               )}
@@ -270,6 +385,80 @@ function OpportunityCard({ entry }: { entry: OpportunityEntry }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Disagreement section ─────────────────────────────────────────────────────
+
+function DisagreementSection({ items }: { items: DisagreementOpportunity[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="bg-white border border-[#FECACA] rounded-xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-[#FECACA] bg-[#FEF2F2]">
+        <div className="text-sm font-semibold text-[#DC2626]">AI High Conviction — Your Low Interest</div>
+        <p className="text-[11px] text-[#DC2626] opacity-70 mt-0.5">
+          The model rates these highly on objective criteria. You&apos;ve signaled low interest.
+          Consider whether the data warrants a second look.
+        </p>
+      </div>
+      <div className="divide-y divide-[#EEEEEE]">
+        {items.map(item => (
+          <div key={item.ticker} className="px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-[#171A20]">{item.ticker}</span>
+                  {item.sector && <span className="text-[11px] text-[#8E8E8E]">{item.sector}</span>}
+                </div>
+                <div className="text-[11px] text-[#5C5E62] mt-1 line-clamp-2">{item.whyAILikes}</div>
+                <div className="text-[11px] text-[#DC2626] mt-0.5">
+                  Your signal: {item.whyUserMayDisagree}
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-lg font-bold text-[#DC2626]">{item.objectiveScore.toFixed(1)}</div>
+                <div className="text-[10px] text-[#AAAAAA]">objective</div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Agreement section ────────────────────────────────────────────────────────
+
+function AgreementSection({ items }: { items: AgreementOpportunity[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="bg-white border border-[#BBF7D0] rounded-xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-[#BBF7D0] bg-[#F0FDF4]">
+        <div className="text-sm font-semibold text-[#15803D]">AI High Conviction — Your High Interest</div>
+        <p className="text-[11px] text-[#15803D] opacity-70 mt-0.5">
+          Both objective scoring and your signals point the same direction.
+        </p>
+      </div>
+      <div className="divide-y divide-[#EEEEEE]">
+        {items.map(item => (
+          <div key={item.ticker} className="px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-[#171A20]">{item.ticker}</span>
+                  {item.sector && <span className="text-[11px] text-[#8E8E8E]">{item.sector}</span>}
+                </div>
+                <div className="text-[11px] text-[#5C5E62] mt-1">{item.alignment}</div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-lg font-bold text-[#15803D]">{item.objectiveScore.toFixed(1)}</div>
+                <div className="text-[10px] text-[#AAAAAA]">objective</div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -288,25 +477,27 @@ const TABS: { id: TabId; label: string }[] = [
 
 function filterAndSort(entries: OpportunityEntry[], tab: TabId): OpportunityEntry[] {
   switch (tab) {
-    case "bestBuys":
-      return [...entries].sort((a, b) => b.opportunityScore - a.opportunityScore);
-    case "conviction":
-      return [...entries].sort((a, b) => b.companyScore - a.companyScore);
+    case "bestBuys":      return [...entries].sort((a, b) => b.objectiveScore - a.objectiveScore);
+    case "conviction":    return [...entries].sort((a, b) => b.companyScore - a.companyScore);
     case "underallocated":
-      return [...entries]
-        .filter(e => e.allocationTarget != null && e.allocationGapScore > 0)
+      return [...entries].filter(e => e.allocationTarget != null && e.allocationGapScore > 0)
         .sort((a, b) => b.allocationGapScore - a.allocationGapScore);
-    case "diversification":
-      return [...entries]
-        .sort((a, b) => b.diversificationScore - a.diversificationScore);
+    case "diversification": return [...entries].sort((a, b) => b.diversificationScore - a.diversificationScore);
     case "watchlist":
-      return [...entries]
-        .filter(e => e.inWatchlist)
-        .sort((a, b) => b.opportunityScore - a.opportunityScore);
+      return [...entries].filter(e => e.inWatchlist).sort((a, b) => b.objectiveScore - a.objectiveScore);
   }
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
+
+type PageTab = "recommended" | "agreement" | "disagreement" | "watchlist" | "screener";
+const PAGE_TABS: { id: PageTab; label: string }[] = [
+  { id: "recommended",  label: "Recommended" },
+  { id: "agreement",    label: "Agreement" },
+  { id: "disagreement", label: "Disagreement" },
+  { id: "watchlist",    label: "Watchlist" },
+  { id: "screener",     label: "Screener" },
+];
 
 export default function OpportunitiesPage() {
   const [result, setResult] = useState<OpportunityResult | null>(null);
@@ -314,16 +505,75 @@ export default function OpportunitiesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("bestBuys");
+  const [pageTab, setPageTab] = useState<PageTab>("recommended");
+  const [feedbackMap, setFeedbackMap] = useState<Record<string, FeedbackType>>({});
+  const [screenerData, setScreenerData] = useState<{ ticker: string; companyName: string; totalScore: number; universeTier: string; sector: string | null }[]>([]);
 
   useEffect(() => {
     fetch("/api/opportunities")
       .then(r => r.json())
       .then(d => {
         if (d.error) throw new Error(d.error);
-        setResult(d as OpportunityResult);
+        const res = d as OpportunityResult;
+        setResult(res);
+        const initial: Record<string, FeedbackType> = {};
+        for (const e of res.entries) {
+          if (e.userFeedback) initial[e.ticker] = e.userFeedback as FeedbackType;
+        }
+        setFeedbackMap(initial);
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (pageTab !== "screener" || screenerData.length > 0) return;
+    fetch("/api/screener")
+      .then(r => r.json())
+      .then(d => {
+        const entries = (d.scored ?? d.entries ?? []) as { ticker: string; companyName: string; totalScore: number; universeTier: string; sector: string | null }[];
+        setScreenerData([...entries].sort((a, b) => b.totalScore - a.totalScore));
+      })
+      .catch(() => {});
+  }, [pageTab, screenerData.length]);
+
+  const handleFeedback = useCallback((ticker: string, type: FeedbackType) => {
+    setFeedbackMap(prev => ({ ...prev, [ticker]: type }));
+    // Patch preference score + userFeedback in-place (objectiveScore never changes)
+    const PREF_SCORES: Record<string, number> = {
+      interested: 90, researching: 75, already_owned: 60, not_interested: 20, disagree: 5,
+    };
+    setResult(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        entries: prev.entries.map(e =>
+          e.ticker !== ticker ? e : { ...e, userFeedback: type, preferenceScore: PREF_SCORES[type] ?? 50 }
+        ),
+        // Rebuild agreement/disagreement surfaces based on updated feedback
+        disagreementOpportunities: prev.disagreementOpportunities.filter(d => d.ticker !== ticker)
+          .concat(
+            prev.entries
+              .filter(e => e.ticker === ticker && e.objectiveScore >= 62 && (type === "disagree" || type === "not_interested"))
+              .map(e => ({
+                ticker: e.ticker, companyName: e.companyName, sector: e.sector,
+                objectiveScore: e.objectiveScore, userFeedback: type,
+                whyAILikes: e.reasoning.whyBuy,
+                whyUserMayDisagree: type === "disagree" ? "Contradicts current investment view" : "Outside current area of interest",
+              }))
+          ),
+        agreementOpportunities: prev.agreementOpportunities.filter(a => a.ticker !== ticker)
+          .concat(
+            prev.entries
+              .filter(e => e.ticker === ticker && e.objectiveScore >= 62 && (type === "interested" || type === "researching"))
+              .map(e => ({
+                ticker: e.ticker, companyName: e.companyName, sector: e.sector,
+                objectiveScore: e.objectiveScore, userFeedback: type,
+                alignment: type === "interested" ? "Marked as interested — aligned with current conviction" : "Actively researching — high personal engagement",
+              }))
+          ),
+      };
+    });
   }, []);
 
   async function handleSave() {
@@ -331,8 +581,7 @@ export default function OpportunitiesPage() {
     try {
       const res = await fetch("/api/opportunities", { method: "POST" });
       if (!res.ok) throw new Error(await res.text());
-      const d: OpportunityResult = await res.json();
-      setResult(d);
+      setResult(await res.json());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save scores.");
     } finally {
@@ -340,9 +589,17 @@ export default function OpportunitiesPage() {
     }
   }
 
+  const entriesWithFeedback = useMemo(() => {
+    if (!result) return [];
+    return result.entries.map(e => ({
+      ...e,
+      userFeedback: feedbackMap[e.ticker] ?? e.userFeedback,
+    }));
+  }, [result, feedbackMap]);
+
   const visibleEntries = useMemo(
-    () => (result ? filterAndSort(result.entries, activeTab) : []),
-    [result, activeTab]
+    () => filterAndSort(entriesWithFeedback, activeTab),
+    [entriesWithFeedback, activeTab]
   );
 
   const fmtUsd = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
@@ -361,125 +618,216 @@ export default function OpportunitiesPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold text-[#171A20]">Opportunity Engine</h1>
+          <h1 className="text-xl font-semibold text-[#171A20]">Opportunities</h1>
           <p className="text-xs text-[#8E8E8E] mt-0.5">
-            Best next buys for your portfolio — quality × allocation gap × diversification
+            Discovery hub · objective rankings · 50% quality · preference visible but never blended
           </p>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={saving || loading}
+        <button onClick={handleSave} disabled={saving || loading}
           className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg text-white transition-opacity"
-          style={{ backgroundColor: "#3E6AE1", opacity: saving ? 0.6 : 1 }}
-        >
+          style={{ backgroundColor: "#3E6AE1", opacity: saving ? 0.6 : 1 }}>
           {saving ? (
-            <>
-              <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-              </svg>
-              Saving...
-            </>
+            <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>Saving...</>
           ) : (
-            <>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-                <polyline points="17 21 17 13 7 13 7 21" />
-                <polyline points="7 3 7 8 15 8" />
-              </svg>
-              Save Snapshot
-            </>
+            <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+              <polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" />
+            </svg>Save Snapshot</>
           )}
         </button>
       </div>
 
       {error && (
-        <div className="text-sm text-[#DC2626] bg-[#FEF2F2] border border-[#FECACA] rounded-lg px-4 py-2">
-          {error}
-        </div>
+        <div className="text-sm text-[#DC2626] bg-[#FEF2F2] border border-[#FECACA] rounded-lg px-4 py-2">{error}</div>
       )}
 
-      {/* Summary stats */}
-      {result && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { label: "Universe Scored", value: result.summary.totalScored.toString() },
-            { label: "New Opportunities", value: result.summary.newPositions.toString() },
-            { label: "On Watchlist", value: result.summary.onWatchlist.toString() },
-            { label: "Available Cash", value: fmtUsd(result.summary.availableCashUsd) },
-          ].map(m => (
-            <div key={m.label} className="bg-white border border-[#EEEEEE] rounded-xl p-3">
-              <div className="text-xs text-[#8E8E8E] mb-1">{m.label}</div>
-              <div className="text-lg font-semibold text-[#171A20]">{m.value}</div>
-            </div>
+      {/* Outer page tab bar */}
+      <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
+        <div className="border-b border-[#EEEEEE] flex overflow-x-auto">
+          {PAGE_TABS.map(pt => (
+            <button key={pt.id} onClick={() => setPageTab(pt.id)}
+              className="shrink-0 px-4 py-3 text-sm font-medium border-b-2 transition-colors"
+              style={
+                pageTab === pt.id
+                  ? { borderColor: "#3E6AE1", color: "#3E6AE1" }
+                  : { borderColor: "transparent", color: "#5C5E62" }
+              }>
+              {pt.label}
+              {pt.id === "agreement" && result && result.agreementOpportunities.length > 0 && (
+                <span className="ml-1.5 text-[10px] bg-[#15803D] text-white rounded-full px-1.5 py-0.5">
+                  {result.agreementOpportunities.length}
+                </span>
+              )}
+              {pt.id === "disagreement" && result && result.disagreementOpportunities.length > 0 && (
+                <span className="ml-1.5 text-[10px] bg-[#DC2626] text-white rounded-full px-1.5 py-0.5">
+                  {result.disagreementOpportunities.length}
+                </span>
+              )}
+              {pt.id === "watchlist" && result && result.summary.onWatchlist > 0 && (
+                <span className="ml-1.5 text-[10px] bg-[#3E6AE1] text-white rounded-full px-1.5 py-0.5">
+                  {result.summary.onWatchlist}
+                </span>
+              )}
+            </button>
           ))}
         </div>
-      )}
 
-      {/* Top opportunity highlight */}
-      {result && result.summary.topOpportunity && (
-        <div className="bg-[#EEF3FD] border border-[#BFDBFE] rounded-xl p-4">
-          <div className="text-[11px] font-semibold text-[#3E6AE1] uppercase tracking-wide mb-1">Top Opportunity</div>
-          <div className="flex items-center gap-3">
-            <span className="text-lg font-bold text-[#1E40AF]">{result.summary.topOpportunity}</span>
-            <span className="text-sm text-[#3E6AE1]">
-              {result.entries[0]?.companyName}
-            </span>
-            <span className="text-xl font-bold text-[#3E6AE1] ml-auto">
-              {result.entries[0]?.opportunityScore.toFixed(1)}
-            </span>
-          </div>
-          <p className="text-xs text-[#3E6AE1] mt-1">{result.entries[0]?.reasoning.whyNow}</p>
+        <div className="p-4">
+          {/* ── Recommended ── */}
+          {pageTab === "recommended" && (
+            <div className="space-y-4">
+              {/* Summary stats */}
+              {result && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[
+                    { label: "Universe Scored",   value: result.summary.totalScored.toString() },
+                    { label: "New Opportunities", value: result.summary.newPositions.toString() },
+                    { label: "On Watchlist",      value: result.summary.onWatchlist.toString() },
+                    { label: "Available Cash",    value: fmtUsd(result.summary.availableCashUsd) },
+                  ].map(m => (
+                    <div key={m.label} className="bg-[#F4F4F4] rounded-xl p-3">
+                      <div className="text-xs text-[#8E8E8E] mb-1">{m.label}</div>
+                      <div className="text-lg font-semibold text-[#171A20]">{m.value}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Top opportunity */}
+              {result?.summary.topOpportunity && (
+                <div className="bg-[#EEF3FD] border border-[#BFDBFE] rounded-xl p-4">
+                  <div className="text-[11px] font-semibold text-[#3E6AE1] uppercase tracking-wide mb-1">Top Objective Opportunity</div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-lg font-bold text-[#1E40AF]">{result.summary.topOpportunity}</span>
+                    <span className="text-sm text-[#3E6AE1]">{result.entries[0]?.companyName}</span>
+                    <span className="text-xl font-bold text-[#3E6AE1] ml-auto">{result.entries[0]?.objectiveScore.toFixed(1)}</span>
+                  </div>
+                  <p className="text-xs text-[#3E6AE1] mt-1">{result.entries[0]?.reasoning.whyNow}</p>
+                </div>
+              )}
+
+              {loading && <div className="py-8 text-center text-sm text-[#8E8E8E]">Computing opportunities…</div>}
+
+              {/* Inner filter tabs + ranked list */}
+              {result && (
+                <div className="border border-[#EEEEEE] rounded-xl overflow-hidden">
+                  <div className="border-b border-[#EEEEEE] flex overflow-x-auto bg-[#F4F4F4]">
+                    {TABS.map(tab => (
+                      <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                        className="shrink-0 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors"
+                        style={
+                          activeTab === tab.id
+                            ? { borderColor: "#3E6AE1", color: "#3E6AE1", backgroundColor: "white" }
+                            : { borderColor: "transparent", color: "#5C5E62", backgroundColor: "transparent" }
+                        }>
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="p-4 space-y-3">
+                    {visibleEntries.length === 0 ? (
+                      <p className="text-sm text-[#8E8E8E] text-center py-8">No opportunities for this filter.</p>
+                    ) : (
+                      visibleEntries.map(entry => (
+                        <OpportunityCard key={entry.ticker} entry={entry} onFeedback={handleFeedback} />
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {result && (
+                <div className="text-center text-xs text-[#AAAAAA]">
+                  Computed {new Date(result.generatedAt).toLocaleString()} · {result.summary.totalScored} entries · {result.preferenceProfile.totalSignals} preference signals
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Agreement ── */}
+          {pageTab === "agreement" && (
+            <div>
+              {result ? (
+                result.agreementOpportunities.length === 0 ? (
+                  <p className="text-sm text-[#8E8E8E] text-center py-8">No agreement opportunities. Mark some tickers as Interested or Researching.</p>
+                ) : (
+                  <AgreementSection items={result.agreementOpportunities} />
+                )
+              ) : (
+                <div className="py-8 text-center text-sm text-[#8E8E8E]">Loading…</div>
+              )}
+            </div>
+          )}
+
+          {/* ── Disagreement ── */}
+          {pageTab === "disagreement" && (
+            <div>
+              {result ? (
+                result.disagreementOpportunities.length === 0 ? (
+                  <p className="text-sm text-[#8E8E8E] text-center py-8">No disagreement opportunities. Mark some high-scoring tickers as Disagree to surface them here.</p>
+                ) : (
+                  <DisagreementSection items={result.disagreementOpportunities} />
+                )
+              ) : (
+                <div className="py-8 text-center text-sm text-[#8E8E8E]">Loading…</div>
+              )}
+            </div>
+          )}
+
+          {/* ── Watchlist ── */}
+          {pageTab === "watchlist" && (
+            <div className="space-y-3">
+              {result ? (
+                result.entries.filter(e => e.inWatchlist).length === 0 ? (
+                  <p className="text-sm text-[#8E8E8E] text-center py-8">No watchlist items in the scored universe.</p>
+                ) : (
+                  result.entries
+                    .filter(e => e.inWatchlist)
+                    .sort((a, b) => b.objectiveScore - a.objectiveScore)
+                    .map(entry => (
+                      <OpportunityCard key={entry.ticker} entry={entry} onFeedback={handleFeedback} />
+                    ))
+                )
+              ) : (
+                <div className="py-8 text-center text-sm text-[#8E8E8E]">Loading…</div>
+              )}
+            </div>
+          )}
+
+          {/* ── Screener ── */}
+          {pageTab === "screener" && (
+            <div>
+              <p className="text-xs text-[#8E8E8E] mb-4">Universe ranked by company score. Use filters on the screener page for advanced filtering.</p>
+              {screenerData.length === 0 ? (
+                <div className="py-8 text-center text-sm text-[#8E8E8E]">Loading screener data…</div>
+              ) : (
+                <div className="space-y-0">
+                  {screenerData.map((e, i) => {
+                    const scoreColor = e.totalScore >= 75 ? "#15803D" : e.totalScore >= 55 ? "#3E6AE1" : "#D97706";
+                    const tierLabel: Record<string, string> = { tier1: "LC", tier2: "MC", tier3: "SC", tier4: "ETF", tier5: "Intl" };
+                    return (
+                      <div key={e.ticker} className="flex items-center gap-3 py-2.5 border-b border-[#EEEEEE] last:border-0">
+                        <div className="w-7 text-[11px] text-[#AAAAAA] text-right shrink-0">{i + 1}</div>
+                        <div className="w-14 font-semibold text-[#171A20] shrink-0">{e.ticker}</div>
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#F4F4F4] text-[#5C5E62] shrink-0">
+                          {tierLabel[e.universeTier] ?? e.universeTier}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs text-[#5C5E62] truncate">{e.companyName}</div>
+                          {e.sector && <div className="text-[10px] text-[#AAAAAA]">{e.sector}</div>}
+                        </div>
+                        <div className="text-sm font-bold shrink-0" style={{ color: scoreColor }}>
+                          {e.totalScore.toFixed(0)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
-      )}
-
-      {/* Tabs */}
-      {result && (
-        <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
-          <div className="border-b border-[#EEEEEE] flex overflow-x-auto">
-            {TABS.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className="shrink-0 px-4 py-3 text-sm font-medium border-b-2 transition-colors"
-                style={
-                  activeTab === tab.id
-                    ? { borderColor: "#3E6AE1", color: "#3E6AE1" }
-                    : { borderColor: "transparent", color: "#5C5E62" }
-                }
-              >
-                {tab.label}
-                {tab.id === "watchlist" && result.summary.onWatchlist > 0 && (
-                  <span className="ml-1.5 text-[10px] bg-[#3E6AE1] text-white rounded-full px-1.5 py-0.5">
-                    {result.summary.onWatchlist}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          <div className="p-4 space-y-3">
-            {visibleEntries.length === 0 ? (
-              <p className="text-sm text-[#8E8E8E] text-center py-8">
-                {activeTab === "watchlist"
-                  ? "No watchlist items in the universe. Add tickers to your watchlist."
-                  : activeTab === "underallocated"
-                  ? "No tickers with allocation targets below threshold."
-                  : "No opportunities available."}
-              </p>
-            ) : (
-              visibleEntries.map(entry => (
-                <OpportunityCard key={entry.ticker} entry={entry} />
-              ))
-            )}
-          </div>
-        </div>
-      )}
-
-      {result && (
-        <div className="text-center text-xs text-[#AAAAAA]">
-          Computed {new Date(result.generatedAt).toLocaleString()} · {result.summary.totalScored} universe entries scored
-        </div>
-      )}
+      </div>
     </div>
   );
 }

@@ -6,6 +6,8 @@
 // All generation is rules-based / template-driven; no AI API calls required.
 
 import { db } from "./db";
+import { loadBrainContext } from "./brain-os-context";
+import type { InvestmentPhilosophyContext } from "./brain-os-context";
 import { computeOpportunities, type OpportunityEntry } from "./opportunity-engine";
 import { fetchCompanyProfile, type FMPProfile } from "./fmp-client";
 import {
@@ -268,100 +270,119 @@ function generateBusinessOverview(
   return { description, revenueDrivers, businessModel };
 }
 
-function generateWhyBuy(entry: OpportunityEntry): WhyBuyReason[] {
+interface PortfolioContext {
+  sectorExposures: Map<string, number>; // sector → % of portfolio
+  availableCashUsd: number;
+  totalCapitalUsd: number;
+  positionCount: number;
+}
+
+function generateWhyBuy(entry: OpportunityEntry, ctx: PortfolioContext): WhyBuyReason[] {
   const reasons: WhyBuyReason[] = [];
   const f = entry.fundamentals;
+  const sectorPct = entry.sector ? (ctx.sectorExposures.get(entry.sector) ?? 0) : null;
+  const sectorGap = sectorPct !== null && sectorPct < 8;
+  const cashPct = ctx.totalCapitalUsd > 0 ? (ctx.availableCashUsd / ctx.totalCapitalUsd) * 100 : 0;
 
-  // 1. ROIC — quality signal
+  // 1. Sector gap — why THIS portfolio needs this stock right now
+  if (sectorGap && entry.sector && entry.assetType !== "etf") {
+    const sectorLabel = sectorPct === 0
+      ? "zero exposure"
+      : `only ${sectorPct!.toFixed(1)}% exposure`;
+    reasons.push({
+      reason: `Fills a concrete portfolio gap — ${entry.sector} (${sectorLabel})`,
+      evidence: `The current portfolio has ${sectorLabel} in ${entry.sector}. Adding ${entry.ticker} directly addresses this imbalance. With ${cashPct.toFixed(0)}% cash available ($${Math.round(ctx.availableCashUsd).toLocaleString()}), this is one of the highest-leverage deployments for sector diversification.`,
+      strength: (sectorPct ?? 0) === 0 ? "strong" : entry.diversificationScore >= 85 ? "strong" : "moderate",
+    });
+  }
+
+  // 2. ROIC — framed against portfolio quality, not in isolation
   if (f?.roic != null) {
     if (f.roic >= 30) {
       reasons.push({
-        reason: "Exceptional capital allocation efficiency",
-        evidence: `${f.roic}% ROIC is top-tier capital efficiency, achievable only with durable competitive advantages. Management consistently compounds shareholder wealth at an above-market rate — a core Buffett/Lynch quality criterion.`,
+        reason: "Raises portfolio's average capital efficiency",
+        evidence: `${f.roic}% ROIC is top-decile — fewer than 5% of public companies sustain this level. Adding ${entry.ticker} raises the weighted-average quality of the portfolio. At this ROIC, every $1 reinvested compounds at a rate that most businesses cannot match.`,
         strength: "strong",
       });
     } else if (f.roic >= 20) {
       reasons.push({
-        reason: "High-quality compounder above hurdle rate",
-        evidence: `${f.roic}% ROIC significantly exceeds the 10% quality threshold. Demonstrates strong capital allocation discipline and durable competitive positioning in core markets.`,
+        reason: "High-quality capital allocator — above hurdle rate",
+        evidence: `${f.roic}% ROIC exceeds the 10% quality threshold by 2×. ${entry.ticker} earns substantially above its cost of capital, meaning management creates real shareholder value on every dollar deployed — not just nominal returns.`,
         strength: "strong",
       });
     } else if (f.roic >= 10) {
       reasons.push({
-        reason: "Quality business earning above cost of capital",
-        evidence: `${f.roic}% ROIC clears the Buffett/Lynch quality threshold. Business earns above its cost of capital, creating value for long-term shareholders on every dollar deployed.`,
+        reason: "Quality business earning above its cost of capital",
+        evidence: `${f.roic}% ROIC clears the Buffett/Lynch quality threshold. While not exceptional, it confirms the business creates rather than destroys shareholder value over a full cycle.`,
         strength: "moderate",
       });
     }
   }
 
-  // 2. Allocation gap — capital deployment opportunity
-  if (entry.allocationTarget && entry.allocationGapScore >= 60) {
+  // 3. Allocation gap — framed as executing a pre-made decision
+  if (entry.allocationTarget && entry.allocationGapScore >= 50) {
     const gap = entry.allocationTarget.targetUsd - (entry.currentValue?.usd ?? 0);
     const pctFunded = Math.max(0, 100 - entry.allocationGapScore);
+    const action = pctFunded === 0 ? "entirely undeployed" : `${Math.round(pctFunded)}% deployed`;
     reasons.push({
-      reason: "Portfolio alignment — planned capital deployment opportunity",
-      evidence: `Currently ${Math.round(pctFunded)}% deployed toward a ${entry.allocationTarget.targetPct}% allocation target. The $${Math.round(gap).toLocaleString()} gap represents a concrete, plan-aligned deployment opportunity — buying the shortfall is the execution of a pre-made investment decision.`,
+      reason: "Executes a pre-decided portfolio allocation",
+      evidence: `${entry.ticker} has a ${entry.allocationTarget.targetPct}% target allocation — currently ${action}. The $${Math.round(gap).toLocaleString()} gap is not a new decision to make; it is a decision already made, waiting on capital deployment. Filling it removes opportunity cost from idle planning.`,
       strength: entry.allocationGapScore >= 80 ? "strong" : "moderate",
     });
   }
 
-  // 3. Gross margin — pricing power / moat
-  if (f?.grossMargin != null && f.grossMargin >= 50) {
-    reasons.push({
-      reason: "Durable pricing power and competitive moat",
-      evidence: `${f.grossMargin}% gross margins demonstrate customers pay premium prices, signaling a defensible competitive position. High-margin businesses are significantly more resilient in economic downturns and compound better over time.`,
-      strength: f.grossMargin >= 65 ? "strong" : "moderate",
-    });
-  }
-
-  // 4. Earnings growth
-  if (f?.epsGrowth != null && f.epsGrowth >= 10) {
-    reasons.push({
-      reason: "Compounding earnings trajectory",
-      evidence: `${f.epsGrowth}% EPS growth YoY${f.epsGrowth >= 20 ? " — well above the 15% fast-grower threshold" : " — solid earnings expansion"}. Sustained EPS growth compounding over a 3-5 year horizon creates substantial per-share value, regardless of near-term multiple fluctuations.`,
-      strength: f.epsGrowth >= 20 ? "strong" : "moderate",
-    });
-  } else if (f?.revenueGrowth != null && f.revenueGrowth >= 12) {
-    reasons.push({
-      reason: "Strong revenue growth trajectory",
-      evidence: `${f.revenueGrowth}% revenue growth YoY demonstrates expanding market demand and business momentum. Revenue growth at scale is a leading indicator of future earnings power.`,
-      strength: f.revenueGrowth >= 20 ? "strong" : "moderate",
-    });
-  }
-
-  // 5. Watchlist conviction
+  // 4. Watchlist → position conversion — framed as action on prior research
   if (entry.inWatchlist) {
     reasons.push({
-      reason: "Pre-researched watchlist conviction — ready to deploy",
-      evidence: "Already on the investment watchlist, indicating prior research and conviction. Converting watchlist interest into capital deployment is a deliberate, high-signal action that avoids analysis paralysis.",
+      reason: "Converts prior research into capital deployment",
+      evidence: `${entry.ticker} is already on the watchlist — meaning research conviction is established. The remaining step is execution, not analysis. Every additional day of watching without deploying is an opportunity cost that compounds silently.`,
       strength: "moderate",
     });
   }
 
-  // 6. FCF generation
-  if (f?.freeCashFlow != null && f.freeCashFlow > 500) {
+  // 5. Earnings growth — framed against holding period
+  if (f?.epsGrowth != null && f.epsGrowth >= 10) {
+    const horizon = "3–5 year";
+    const compoundMsg = f.epsGrowth >= 20
+      ? `At ${f.epsGrowth}% annual EPS growth, earnings double in under 4 years.`
+      : `At ${f.epsGrowth}% annual growth, earnings expand meaningfully over the ${horizon} holding horizon.`;
     reasons.push({
-      reason: "Substantial free cash flow generation",
-      evidence: `$${Math.round(f.freeCashFlow).toLocaleString()}M annual free cash flow. FCF-generative businesses self-fund growth, return capital through buybacks/dividends, and navigate economic downturns without dilutive financing.`,
+      reason: `Earnings compounding supports the ${horizon} thesis`,
+      evidence: `${f.epsGrowth}% EPS growth YoY. ${compoundMsg} Per-share value creation at this rate makes near-term multiple fluctuations secondary — the compounding does the work.`,
+      strength: f.epsGrowth >= 20 ? "strong" : "moderate",
+    });
+  } else if (f?.revenueGrowth != null && f.revenueGrowth >= 12) {
+    reasons.push({
+      reason: "Revenue momentum supports long-term earnings thesis",
+      evidence: `${f.revenueGrowth}% revenue growth YoY at scale. Revenue growth consistently translates to earnings leverage as operating costs grow more slowly, expanding margins over a 3–5 year horizon.`,
+      strength: f.revenueGrowth >= 20 ? "strong" : "moderate",
+    });
+  }
+
+  // 6. Gross margin / moat — framed against portfolio mix
+  if (f?.grossMargin != null && f.grossMargin >= 50 && reasons.length < 4) {
+    reasons.push({
+      reason: "Durable moat — defensible margins across economic cycles",
+      evidence: `${f.grossMargin}% gross margin means ${entry.ticker} retains ${f.grossMargin.toFixed(0)} cents of every revenue dollar before operating costs — a clear signal of pricing power. High-margin businesses weather downturns better and compound retained earnings faster than commodity businesses.`,
+      strength: f.grossMargin >= 65 ? "strong" : "moderate",
+    });
+  }
+
+  // 7. FCF — framed as self-funding quality
+  if (f?.freeCashFlow != null && f.freeCashFlow > 500 && reasons.length < 4) {
+    const fcfB = (f.freeCashFlow / 1000).toFixed(1);
+    reasons.push({
+      reason: "Self-funding business — no external capital required",
+      evidence: `$${fcfB}B annual free cash flow. ${entry.ticker} generates enough cash to fund its own growth, buy back shares, and absorb adversity — without relying on equity markets or debt. This independence is a material quality advantage over businesses that require continuous capital raises.`,
       strength: f.freeCashFlow > 10000 ? "strong" : "moderate",
     });
   }
 
-  // 7. Portfolio diversification
-  if (entry.diversificationScore >= 70 && entry.sector && entry.assetType !== "etf") {
-    reasons.push({
-      reason: "Portfolio diversification — underrepresented sector",
-      evidence: `${entry.sector} exposure is limited in the current portfolio. Adding this position reduces single-sector concentration risk and improves overall portfolio resilience across economic cycles.`,
-      strength: entry.diversificationScore >= 85 ? "strong" : "moderate",
-    });
-  }
-
-  // 8. Balance sheet strength
+  // 8. Balance sheet — fallback if reasons list is thin
   if (f?.debtToEquity != null && f.debtToEquity < 0.3 && reasons.length < 3) {
     reasons.push({
-      reason: "Fortress balance sheet — financial flexibility",
-      evidence: `${f.debtToEquity} D/E ratio is well below the 1.0 quality threshold. Low leverage provides financial flexibility to fund growth, make acquisitions, and weather downturns without equity dilution.`,
+      reason: "Financial flexibility — clean balance sheet",
+      evidence: `${f.debtToEquity} D/E is well below the 1.0 threshold. Low leverage preserves financial flexibility: the company can invest opportunistically, weather downturns, and return capital to shareholders without equity dilution.`,
       strength: "moderate",
     });
   }
@@ -369,7 +390,7 @@ function generateWhyBuy(entry: OpportunityEntry): WhyBuyReason[] {
   return reasons.slice(0, 5);
 }
 
-function generateRisks(entry: OpportunityEntry): RiskSections {
+function generateRisks(entry: OpportunityEntry, philosophy: InvestmentPhilosophyContext | null = null): RiskSections {
   const businessRisks = getSectorRisks(entry.sector);
   const financialRisks: RiskItem[] = [];
   const portfolioRisks: RiskItem[] = [];
@@ -425,8 +446,11 @@ function generateRisks(entry: OpportunityEntry): RiskSections {
       risk: "Currency risk — international company; USD/local-currency fluctuations affect USD-denominated returns directly.",
       severity: "medium",
     });
+    const geoDetail = philosophy?.geopoliticalPhilosophy.length
+      ? ` Philosophy: ${philosophy.geopoliticalPhilosophy[0]}`
+      : " Cross-border exposure to trade policy, sanctions, or foreign market disruptions.";
     portfolioRisks.push({
-      risk: "Geopolitical risk — cross-border exposure to trade policy, sanctions, or foreign market disruptions.",
+      risk: `Geopolitical risk —${geoDetail}`,
       severity: "medium",
     });
   }
@@ -449,7 +473,8 @@ function generateRisks(entry: OpportunityEntry): RiskSections {
 
 function generatePortfolioFit(
   entry: OpportunityEntry,
-  portfolioSectors: string[]
+  portfolioSectors: string[],
+  philosophy: InvestmentPhilosophyContext | null = null
 ): PortfolioFit {
   const relatedHoldings = portfolioSectors.filter(s => s.split(":")[0] === entry.sector).map(s => s.split(":")[1]);
 
@@ -482,7 +507,16 @@ function generatePortfolioFit(
       ? "Moderate fit — some quality metrics are present but full Brain OS alignment is not achieved."
       : "Weaker fit — does not fully satisfy quality-compounder criteria; consider as a diversifier rather than core conviction.";
 
-  const summary = `${entry.ticker} ${entry.reasoning.positionType === "initiate" ? "initiates" : "adds to"} the portfolio as a ${entry.sector ?? entry.assetType} position. ${qualityFit} Opportunity score of ${entry.opportunityScore}/100 ranks it ${entry.opportunityScore >= 75 ? "highly" : entry.opportunityScore >= 55 ? "moderately" : "lower"} across quality, allocation, and portfolio fit dimensions.`;
+  const isHedgeSector = ["Industrials", "Energy", "Materials"].includes(entry.sector ?? "");
+  const hedgeNote = isHedgeSector && philosophy?.portfolioConstruction.length
+    ? ` Investment philosophy: ${philosophy.portfolioConstruction.find(r => /hedge|defensive/i.test(r)) ?? philosophy.portfolioConstruction[0]}`
+    : "";
+
+  const coreNote = !isHedgeSector && philosophy?.portfolioConstruction.length
+    ? ` Philosophy: ${philosophy.portfolioConstruction[0].toLowerCase().replace(/\.$/, "")}.`
+    : "";
+
+  const summary = `${entry.ticker} ${entry.reasoning.positionType === "initiate" ? "initiates" : "adds to"} the portfolio as a ${entry.sector ?? entry.assetType} position. ${qualityFit} Opportunity score of ${entry.opportunityScore}/100 ranks it ${entry.opportunityScore >= 75 ? "highly" : entry.opportunityScore >= 55 ? "moderately" : "lower"} across quality, allocation, and portfolio fit dimensions.${hedgeNote}${coreNote}`;
 
   return { summary, diversificationImpact, allocationImpact, relatedHoldings };
 }
@@ -559,17 +593,39 @@ export async function generateDossier(ticker: string, apiKey: string): Promise<R
   // 2. Fetch company profile from FMP (best-effort — fallback gracefully)
   const profile = apiKey ? await fetchCompanyProfile(ticker, apiKey) : null;
 
-  // 3. Build portfolio sector context for diversification narrative
+  // 3. Build portfolio context for personalized reasoning
   const positions = await db.position.findMany({ where: { status: "active" } });
+  const settings = await db.portfolioSettings.findFirst();
+  const totalCapitalUsd = settings?.totalCapitalUsd ?? 0;
+  const cashPos = positions.find(p => p.ticker === "CASH");
+  const availableCashUsd = cashPos?.currentValueUsd ?? 0;
+
+  const sectorExposures = new Map<string, number>();
+  for (const p of positions) {
+    if (p.ticker === "CASH" || !p.sector) continue;
+    const pct = p.allocationPct ?? 0;
+    if (pct > 0) sectorExposures.set(p.sector, (sectorExposures.get(p.sector) ?? 0) + pct);
+  }
+
+  const portfolioContext: PortfolioContext = {
+    sectorExposures,
+    availableCashUsd,
+    totalCapitalUsd,
+    positionCount: positions.filter(p => p.ticker !== "CASH").length,
+  };
+
   const portfolioSectors = positions
     .filter(p => p.ticker !== "CASH" && p.sector)
     .map(p => `${p.sector}:${p.ticker}`);
 
-  // 4. Generate all sections
+  // 4. Generate all sections — load philosophy as context (no rankings modified)
+  const brainCtx = loadBrainContext();
+  const philosophy = brainCtx.investmentPhilosophy;
+
   const businessOverview = generateBusinessOverview(entry, profile);
-  const whyBuy = generateWhyBuy(entry);
-  const risks = generateRisks(entry);
-  const portfolioFit = generatePortfolioFit(entry, portfolioSectors);
+  const whyBuy = generateWhyBuy(entry, portfolioContext);
+  const risks = generateRisks(entry, philosophy);
+  const portfolioFit = generatePortfolioFit(entry, portfolioSectors, philosophy);
   const thesisDraft = generateThesisDraft(entry, whyBuy, businessOverview.description);
 
   const investmentSummary: InvestmentSummary = {

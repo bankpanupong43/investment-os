@@ -56,6 +56,14 @@ export interface HistoricalAllocationProposal {
   note: string;
 }
 
+export interface InvestmentPhilosophyContext {
+  timeHorizon: string;
+  riskPhilosophy: string[];
+  portfolioConstruction: string[];
+  geopoliticalPhilosophy: string[];
+  decisionFramework: { priority: number; criterion: string }[];
+}
+
 export interface BrainOSContext {
   loaded: boolean;
   loadedAt: string;
@@ -70,6 +78,7 @@ export interface BrainOSContext {
   riskPhilosophy: RiskRule[];
   portfolioConstructionRules: PortfolioConstructionRule[];
   historicalProposals: HistoricalAllocationProposal[];
+  investmentPhilosophy: InvestmentPhilosophyContext | null;
 }
 
 // ─── Source file registry ─────────────────────────────────────────────────────
@@ -80,6 +89,7 @@ const SOURCES: Record<string, string> = {
   "Personal Mission":          "05 Life/Personal Mission.md",
   "Portfolio Strategy":        "07 Investment/Portfolio Strategy.md",
   "Stock Selection Framework": "07 Investment/Stock Selection Framework.md",
+  "Investment Philosophy":     "07 Investment/Investment Philosophy.md",
 };
 
 function readFile(relativePath: string): string | null {
@@ -222,6 +232,37 @@ function parseHistoricalProposals(content: string): HistoricalAllocationProposal
   return proposals;
 }
 
+// ─── Investment Philosophy parser ────────────────────────────────────────────
+// Reads from Investment Philosophy.md — plain bullet format (no bold markers).
+// Historical Allocation Proposals section is deliberately ignored.
+
+function extractPlainBullets(content: string, heading: string): string[] {
+  const section = extractMarkdownSection(content, heading);
+  if (!section) return [];
+  return section.split("\n")
+    .map(l => l.match(/^- (.+)/)?.[1]?.trim() ?? "")
+    .filter(Boolean);
+}
+
+function parseDecisionFramework(content: string): { priority: number; criterion: string }[] {
+  const section = extractMarkdownSection(content, "Decision Framework");
+  if (!section) return [];
+  return section.split("\n")
+    .map(l => { const m = l.match(/^(\d+)\.\s+(.+)/); return m ? { priority: parseInt(m[1]), criterion: m[2].trim().replace(/\.$/, "") } : null; })
+    .filter((x): x is { priority: number; criterion: string } => x !== null);
+}
+
+function parseInvestmentPhilosophy(content: string): InvestmentPhilosophyContext {
+  return {
+    timeHorizon: extractMarkdownSection(content, "Time Horizon").trim() || "20–40 years",
+    riskPhilosophy: extractPlainBullets(content, "Risk Philosophy"),
+    portfolioConstruction: extractPlainBullets(content, "Portfolio Construction Philosophy"),
+    geopoliticalPhilosophy: extractPlainBullets(content, "Geopolitical Philosophy"),
+    decisionFramework: parseDecisionFramework(content),
+    // "Historical Allocation Proposals" section is ignored — not binding targets
+  };
+}
+
 // ─── Fallback (Brain OS unavailable) ─────────────────────────────────────────
 
 const FALLBACK: BrainOSContext = {
@@ -250,6 +291,7 @@ const FALLBACK: BrainOSContext = {
   riskPhilosophy: [],
   portfolioConstructionRules: [],
   historicalProposals: [],
+  investmentPhilosophy: null,
 };
 
 // ─── Main loader ──────────────────────────────────────────────────────────────
@@ -308,6 +350,10 @@ export function loadBrainContext(): BrainOSContext {
   const riskPhilosophy = parseRiskPhilosophy(strategyContent);
   const portfolioConstructionRules = parsePortfolioConstructionRules(strategyContent);
   const historicalProposals = parseHistoricalProposals(strategyContent);
+
+  // ── Parse Investment Philosophy — principles only, Historical Proposals ignored
+  const investmentPhilosophy: InvestmentPhilosophyContext | null =
+    raw["Investment Philosophy"] ? parseInvestmentPhilosophy(raw["Investment Philosophy"]) : null;
 
   // ── Influences mapping ─────────────────────────────────────────────────────
   const influences: BrainContextInfluence[] = [];
@@ -383,6 +429,44 @@ export function loadBrainContext(): BrainOSContext {
     });
   }
 
+  // ── Investment Philosophy influences — 4 sections as distinct signals ──────
+  if (investmentPhilosophy) {
+    if (investmentPhilosophy.riskPhilosophy.length > 0) {
+      influences.push({
+        source: SOURCES["Investment Philosophy"],
+        insight: `Risk philosophy: ${investmentPhilosophy.riskPhilosophy[0]}. ${investmentPhilosophy.riskPhilosophy[1] ?? ""}`.trim(),
+        appliesTo: ["biggestRisk", "riskAnalysis"],
+        excerpt: investmentPhilosophy.riskPhilosophy.slice(0, 2).join(" | "),
+      });
+    }
+    if (investmentPhilosophy.portfolioConstruction.length > 0) {
+      influences.push({
+        source: SOURCES["Investment Philosophy"],
+        insight: `Portfolio construction: ${investmentPhilosophy.portfolioConstruction[0]}. Defensive assets act as hedges, not core positions.`,
+        appliesTo: ["mostUnderallocated", "biggestOpportunity"],
+        excerpt: investmentPhilosophy.portfolioConstruction.slice(0, 2).join(" | "),
+      });
+    }
+    if (investmentPhilosophy.geopoliticalPhilosophy.length > 0) {
+      influences.push({
+        source: SOURCES["Investment Philosophy"],
+        insight: `Geopolitical context: ${investmentPhilosophy.geopoliticalPhilosophy[0]}. Small allocations to defense, energy, and gold serve as hedges. Hedges should remain minority positions.`,
+        appliesTo: ["biggestRisk", "riskAnalysis"],
+        excerpt: investmentPhilosophy.geopoliticalPhilosophy.slice(0, 2).join(" | "),
+      });
+    }
+    if (investmentPhilosophy.decisionFramework.length > 0) {
+      const top3 = investmentPhilosophy.decisionFramework.slice(0, 3)
+        .map(d => `${d.priority}. ${d.criterion}`).join("; ");
+      influences.push({
+        source: SOURCES["Investment Philosophy"],
+        insight: `Decision framework priority order: ${top3}. Evaluate opportunities in this sequence — compounding potential ranks before portfolio fit.`,
+        appliesTo: ["biggestOpportunity", "mostUnderallocated", "weakestThesis"],
+        excerpt: top3,
+      });
+    }
+  }
+
   // ── Synthesized summary ────────────────────────────────────────────────────
   const principlesSummary = investmentPrinciples.length > 0
     ? ` Key principles: ${investmentPrinciples[0].principle}; ${investmentPrinciples[2]?.principle ?? "build a portfolio that can survive multiple futures"}.`
@@ -415,5 +499,6 @@ export function loadBrainContext(): BrainOSContext {
     riskPhilosophy,
     portfolioConstructionRules,
     historicalProposals,
+    investmentPhilosophy,
   };
 }
