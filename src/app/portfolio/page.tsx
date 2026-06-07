@@ -131,14 +131,28 @@ function HoldingsTab() {
 
 // ─── Allocation tab ───────────────────────────────────────────────────────────
 
+// Mirrors the actual shape returned by GET /api/allocation
 interface AllocationResponse {
-  entries: AllocationEntry[];
+  settings: {
+    label: string;
+    totalCapitalUsd: number;
+    totalCapitalThb: number;
+    exchangeRate: number;
+    source: string | null;
+  };
+  summary: {
+    totalTargetUsd: number;
+    totalDeployedUsd: number;
+    totalUntrackedUsd: number;
+    cashUsd: number;
+    totalGapUsd: number;
+    pctFunded: number;
+    canFullyFund: boolean;
+    shortfallUsd: number;
+    snapshotDate: string | null;
+  };
+  targets: AllocationEntry[];
   untracked: UntrackedPosition[];
-  totalCapitalUsd: number;
-  totalCapitalThb: number;
-  totalDeployedUsd: number;
-  totalGapUsd: number;
-  availableCashUsd: number;
 }
 
 const BUCKET_BAR: Record<string, string> = {
@@ -156,9 +170,13 @@ function AllocationTab() {
 
   useEffect(() => {
     fetch("/api/allocation")
-      .then(r => r.json())
+      .then(async r => {
+        const json = await r.json();
+        if (!r.ok) throw new Error(json.error ?? `HTTP ${r.status}`);
+        return json as AllocationResponse;
+      })
       .then(d => setData(d))
-      .catch(e => setError(e.message))
+      .catch(e => setError(e instanceof Error ? e.message : "Failed to load allocation"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -166,19 +184,19 @@ function AllocationTab() {
   if (error) return <div className="text-sm text-[#DC2626] py-4">{error}</div>;
   if (!data) return null;
 
-  const pctFunded = data.totalCapitalUsd > 0
-    ? Math.round((data.totalDeployedUsd / data.totalCapitalUsd) * 100)
-    : 0;
+  const targets = data.targets ?? [];
+  const { totalCapitalUsd } = data.settings;
+  const { totalDeployedUsd, totalGapUsd, pctFunded } = data.summary;
 
   return (
     <div className="space-y-4">
       {/* Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: "Total Capital", value: fmt(data.totalCapitalUsd) },
-          { label: "Deployed", value: fmt(data.totalDeployedUsd) },
-          { label: "Gap", value: fmt(data.totalGapUsd) },
-          { label: "% Funded", value: pctFunded + "%" },
+          { label: "Total Capital", value: fmt(totalCapitalUsd) },
+          { label: "Deployed", value: fmt(totalDeployedUsd) },
+          { label: "Gap", value: fmt(totalGapUsd) },
+          { label: "% Funded", value: Math.round(pctFunded) + "%" },
         ].map(m => (
           <div key={m.label} className="bg-white border border-[#EEEEEE] rounded-xl p-3">
             <div className="text-xs text-[#8E8E8E] mb-1">{m.label}</div>
@@ -187,14 +205,12 @@ function AllocationTab() {
         ))}
       </div>
 
-      {/* Allocation entries */}
+      {/* Allocation targets */}
       <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
-        {data.entries.map(e => {
+        {targets.map(e => {
           const barColor = BUCKET_BAR[e.bucket] ?? "#8E8E8E";
           const pct = Math.min(100, e.pctFunded);
-          const gapBadge = e.gapUsd > 0
-            ? `${fmt(e.gapUsd)} gap`
-            : "Fully funded";
+          const gapBadge = e.gapUsd > 0 ? `${fmt(e.gapUsd)} gap` : "Fully funded";
           return (
             <div key={e.ticker} className="flex items-center gap-4 px-4 py-3 border-b border-[#EEEEEE] last:border-0">
               <div className="w-14 font-semibold text-[#171A20]">{e.ticker}</div>
@@ -214,7 +230,7 @@ function AllocationTab() {
             </div>
           );
         })}
-        {data.entries.length === 0 && (
+        {targets.length === 0 && (
           <div className="px-4 py-8 text-center text-sm text-[#8E8E8E]">No allocation targets set.</div>
         )}
       </div>
