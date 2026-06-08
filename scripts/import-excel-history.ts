@@ -57,7 +57,7 @@ async function importHistory() {
         date: new Date(row.date + "T00:00:00Z"),
         type: delta > 0 ? "deposit" : "withdrawal",
         amountUsd: absDelta,
-        note: `Excel Sheet2 import — ต้นทุน delta on ${row.date}`,
+        note: `Excel import — net deposits delta on ${row.date}`,
       });
     }
     prevNetDep = row.netDepositsUsd;

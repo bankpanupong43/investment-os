@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import { WatchlistButton } from "@/components/watchlist-button";
 import type { ResearchDossierData, FactItem } from "@/app/api/research/route";
 import type { OpportunityEntry, OpportunityResult } from "@/app/api/opportunities/route";
 
@@ -416,6 +417,12 @@ function DossierCard({ d }: { d: ResearchDossierData }) {
 
           {/* Actions */}
           <div className="flex items-center gap-3 pt-1 flex-wrap">
+            <WatchlistButton
+              ticker={d.ticker}
+              companyName={d.companyName}
+              initiallyWatched={d.investmentSummary.inWatchlist}
+              size="sm"
+            />
             <button
               onClick={handleExport}
               disabled={exporting}
@@ -522,6 +529,8 @@ export default function ResearchPage() {
   const [earnings, setEarnings] = useState<EarningsRow[]>([]);
   const [universe, setUniverse] = useState<UniverseRow[]>([]);
   const [hubLoading, setHubLoading] = useState<Record<HubTab, boolean>>({ dossiers: false, filings: false, earnings: false, universe: false });
+  const hubFetchedRef = useRef<Record<HubTab, boolean>>({ dossiers: false, filings: false, earnings: false, universe: false });
+  const [hubErrors, setHubErrors] = useState<Partial<Record<HubTab, string>>>({});
 
   useEffect(() => {
     Promise.all([
@@ -537,34 +546,42 @@ export default function ResearchPage() {
   }, []);
 
   useEffect(() => {
-    if (hubTab === "filings" && filings.length === 0 && !hubLoading.filings) {
+    if (hubTab === "filings" && filings.length === 0 && !hubFetchedRef.current.filings) {
+      hubFetchedRef.current.filings = true;
       setHubLoading(p => ({ ...p, filings: true }));
       fetch("/api/filings?limit=30")
-        .then(r => r.json())
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
         .then(d => setFilings(d.filings ?? []))
-        .catch(() => {})
+        .catch(() => setHubErrors(p => ({ ...p, filings: "Failed to load filings." })))
         .finally(() => setHubLoading(p => ({ ...p, filings: false })));
     }
-    if (hubTab === "earnings" && earnings.length === 0 && !hubLoading.earnings) {
+    if (hubTab === "earnings" && earnings.length === 0 && !hubFetchedRef.current.earnings) {
+      hubFetchedRef.current.earnings = true;
       setHubLoading(p => ({ ...p, earnings: true }));
       fetch("/api/earnings?limit=30")
-        .then(r => r.json())
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
         .then(d => setEarnings(Array.isArray(d) ? d : []))
-        .catch(() => {})
+        .catch(() => setHubErrors(p => ({ ...p, earnings: "Failed to load earnings." })))
         .finally(() => setHubLoading(p => ({ ...p, earnings: false })));
     }
-    if (hubTab === "universe" && universe.length === 0 && !hubLoading.universe) {
+    if (hubTab === "universe" && universe.length === 0 && !hubFetchedRef.current.universe) {
+      hubFetchedRef.current.universe = true;
       setHubLoading(p => ({ ...p, universe: true }));
       fetch("/api/screener")
-        .then(r => r.json())
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
         .then(d => {
-          const rows = (d.scored ?? d.entries ?? []) as UniverseRow[];
-          setUniverse([...rows].sort((a, b) => b.totalScore - a.totalScore));
+          type ScoredRow = { ticker: string; companyName: string; universeTier: string; sector: string | null; latestScore: { totalScore: number } | null };
+          const rows = (d.passed ?? d.all ?? []) as ScoredRow[];
+          setUniverse(
+            rows
+              .map(e => ({ ticker: e.ticker, companyName: e.companyName, universeTier: e.universeTier, sector: e.sector, totalScore: e.latestScore?.totalScore ?? 0 }))
+              .sort((a, b) => b.totalScore - a.totalScore)
+          );
         })
-        .catch(() => {})
+        .catch(() => setHubErrors(p => ({ ...p, universe: "Failed to load universe." })))
         .finally(() => setHubLoading(p => ({ ...p, universe: false })));
     }
-  }, [hubTab, filings.length, earnings.length, universe.length, hubLoading]);
+  }, [hubTab, filings.length, earnings.length, universe.length]);
 
   const handleGenerate = useCallback(async (ticker: string) => {
     setGeneratingTickers(prev => new Set(prev).add(ticker));
@@ -760,6 +777,8 @@ export default function ResearchPage() {
               <p className="text-xs text-[#8E8E8E] mb-4">Recent SEC filings — most recent first. Use the Automation page to ingest new filings.</p>
               {hubLoading.filings ? (
                 <div className="py-8 text-center text-sm text-[#8E8E8E]">Loading filings…</div>
+              ) : hubErrors.filings ? (
+                <div className="py-8 text-center text-sm text-[#c0392b]">{hubErrors.filings}</div>
               ) : filings.length === 0 ? (
                 <div className="py-8 text-center text-sm text-[#8E8E8E]">No filings ingested yet.</div>
               ) : (
@@ -795,6 +814,8 @@ export default function ResearchPage() {
               <p className="text-xs text-[#8E8E8E] mb-4">Recent earnings events — most recent first.</p>
               {hubLoading.earnings ? (
                 <div className="py-8 text-center text-sm text-[#8E8E8E]">Loading earnings…</div>
+              ) : hubErrors.earnings ? (
+                <div className="py-8 text-center text-sm text-[#c0392b]">{hubErrors.earnings}</div>
               ) : earnings.length === 0 ? (
                 <div className="py-8 text-center text-sm text-[#8E8E8E]">No earnings events recorded yet.</div>
               ) : (
@@ -841,6 +862,8 @@ export default function ResearchPage() {
               <p className="text-xs text-[#8E8E8E] mb-4">Full investment universe ranked by company score.</p>
               {hubLoading.universe ? (
                 <div className="py-8 text-center text-sm text-[#8E8E8E]">Loading universe…</div>
+              ) : hubErrors.universe ? (
+                <div className="py-8 text-center text-sm text-[#c0392b]">{hubErrors.universe}</div>
               ) : universe.length === 0 ? (
                 <div className="py-8 text-center text-sm text-[#8E8E8E]">Universe is empty.</div>
               ) : (

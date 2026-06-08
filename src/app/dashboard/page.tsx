@@ -2,6 +2,25 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+interface ArchitectSummary {
+  id: string;
+  marketRegime: string;
+  cashAllocation: number;
+  hedgeAllocation: number;
+  gapAnalysis: Array<{ dimension: string; action: string; priority: string; gap: number }>;
+  capitalAllocation: { recommendation: string };
+  reasoning: string;
+  createdAt: string;
+}
+
+interface MorningBriefSummary {
+  id: string;
+  briefingDate: string;
+  marketRegime: "Risk On" | "Neutral" | "Risk Off";
+  recommendedActions: Array<{ priority: number; action: string; urgency: string; ticker: string | null }>;
+  portfolioImpact: { positive: unknown[]; neutral: unknown[]; negative: unknown[] };
+}
+
 interface OpportunityEntry {
   ticker: string;
   companyName: string;
@@ -128,6 +147,8 @@ export default function DashboardPage() {
   const [committeeAlerts, setCommitteeAlerts] = useState<CommitteeSummary[]>([]);
   const [perfGainUsd, setPerfGainUsd] = useState<number | null>(null);
   const [perfReturnPct, setPerfReturnPct] = useState<number | null>(null);
+  const [morningBrief, setMorningBrief] = useState<MorningBriefSummary | null>(null);
+  const [architect, setArchitect] = useState<ArchitectSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -163,6 +184,14 @@ export default function DashboardPage() {
     fetch("/api/performance").then(r => r.json()).then(d => {
       setPerfGainUsd(d.gainUsd ?? null);
       setPerfReturnPct(d.totalReturnPct ?? null);
+    }).catch(() => {});
+
+    fetch("/api/morning-brief").then(r => r.ok ? r.json() : null).then(d => {
+      if (d) setMorningBrief(d);
+    }).catch(() => {});
+
+    fetch("/api/architect").then(r => r.ok ? r.json() : null).then(d => {
+      if (d?.blueprint) setArchitect(d.blueprint);
     }).catch(() => {});
   }, []);
 
@@ -284,6 +313,92 @@ export default function DashboardPage() {
           </div>
         </Link>
       )}
+
+      {/* Morning Brief card */}
+      {morningBrief && (() => {
+        const REGIME_STYLE: Record<string, { bg: string; text: string; border: string; dot: string }> = {
+          "Risk On":  { bg: "bg-[#eef7f1]",  text: "text-[#2d7d46]",  border: "border-[#c3e6cf]", dot: "bg-[#2d7d46]" },
+          "Neutral":  { bg: "bg-[#fffbeb]",  text: "text-[#b45309]",  border: "border-[#fde68a]", dot: "bg-[#b45309]" },
+          "Risk Off": { bg: "bg-[#fdf0ee]",  text: "text-[#c0392b]",  border: "border-[#f5c6c1]", dot: "bg-[#c0392b]" },
+        };
+        const style = REGIME_STYLE[morningBrief.marketRegime] ?? REGIME_STYLE["Neutral"];
+        const topAction = morningBrief.recommendedActions?.[0];
+        const posCount = morningBrief.portfolioImpact?.positive?.length ?? 0;
+        const negCount = morningBrief.portfolioImpact?.negative?.length ?? 0;
+        return (
+          <Link
+            href="/morning"
+            className="block bg-white border border-[#EEEEEE] hover:border-[#3E6AE1] rounded-xl px-5 py-4 transition-colors"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest mb-2">Morning Brief</div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className={`flex items-center gap-1.5 text-sm font-semibold px-2.5 py-1 rounded-lg border ${style.bg} ${style.border} ${style.text}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
+                    {morningBrief.marketRegime}
+                  </span>
+                  <span className="text-xs text-[#8E8E8E]">
+                    {posCount > 0 && <span className="text-[#2d7d46]">{posCount} positive</span>}
+                    {posCount > 0 && negCount > 0 && " · "}
+                    {negCount > 0 && <span className="text-[#c0392b]">{negCount} review</span>}
+                  </span>
+                </div>
+                {topAction && (
+                  <div className="text-sm text-[#5C5E62]">
+                    <span className="font-medium text-[#171A20]">#{topAction.priority}</span>{" "}
+                    {topAction.action}
+                  </div>
+                )}
+              </div>
+              <span className="text-[#AAAAAA] mt-1 shrink-0">→</span>
+            </div>
+          </Link>
+        );
+      })()}
+
+      {/* Portfolio Architect card */}
+      {architect && (() => {
+        const REGIME_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+          "Risk On":  { bg: "bg-[#eef7f1]", text: "text-[#2d7d46]", border: "border-[#c3e6cf]" },
+          "Neutral":  { bg: "bg-[#fffbeb]", text: "text-[#b45309]", border: "border-[#fde68a]" },
+          "Risk Off": { bg: "bg-[#fdf0ee]", text: "text-[#c0392b]", border: "border-[#f5c6c1]" },
+        };
+        const rc = REGIME_COLORS[architect.marketRegime] ?? REGIME_COLORS["Neutral"];
+        const topGap = architect.gapAnalysis?.find((g: { priority: string }) => g.priority === "high");
+        const depRec = architect.capitalAllocation?.recommendation;
+        const depLabel = depRec === "deploy" ? "Deploy cash" : depRec === "partial_deploy" ? "Partial deploy" : "Hold cash";
+        return (
+          <Link
+            href="/architect"
+            className="block bg-white border border-[#EEEEEE] hover:border-[#3E6AE1] rounded-xl px-5 py-4 transition-colors"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest mb-2">Portfolio Architect</div>
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${rc.bg} ${rc.border} ${rc.text}`}>
+                    {architect.marketRegime}
+                  </span>
+                  <span className="text-xs text-[#5C5E62]">
+                    Cash target {architect.cashAllocation}% · Hedge {architect.hedgeAllocation}%
+                  </span>
+                  <span className={`text-xs font-medium ${depRec === "hold" ? "text-[#b45309]" : "text-[#2d7d46]"}`}>
+                    {depLabel}
+                  </span>
+                </div>
+                {topGap && (
+                  <div className="text-xs text-[#5C5E62]">
+                    <span className="font-medium text-[#c0392b]">High priority: </span>
+                    {topGap.dimension} — {topGap.action} ({topGap.gap > 0 ? "+" : ""}{topGap.gap.toFixed(0)}%)
+                  </div>
+                )}
+              </div>
+              <span className="text-[#AAAAAA] mt-1 shrink-0">→</span>
+            </div>
+          </Link>
+        );
+      })()}
 
       {/* Secondary metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

@@ -9,6 +9,10 @@ import { runIntegrityChecks } from "./integrity-engine";
 import { ingestPortfolioFilings } from "./sec-ingestion";
 import { evaluatePortfolioThesisImpacts } from "./thesis-impact-engine";
 import { computeOpportunities, saveOpportunityScores } from "./opportunity-engine";
+import { generateMorningBrief, saveMorningBrief } from "./morning-brief-engine";
+import { generateRadarCandidates, saveRadarCandidates } from "./radar-engine";
+import { generateBlueprint, saveBlueprint } from "./architect-engine";
+import { runMacroIngestion } from "./macro-ingestion";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,6 +57,7 @@ export interface NightlyRunResult {
 export const JOB_NAMES = [
   "backup",
   "integrity_check",
+  "macro_ingestion",
   "sec_filing_refresh",
   "earnings_refresh",
   "fmp_refresh",
@@ -61,6 +66,9 @@ export const JOB_NAMES = [
   "dossier_refresh",
   "portfolio_review_refresh",
   "brain_os_export",
+  "morning_brief",
+  "radar_refresh",
+  "portfolio_architect",
 ] as const;
 
 export type JobName = typeof JOB_NAMES[number];
@@ -68,6 +76,7 @@ export type JobName = typeof JOB_NAMES[number];
 export const JOB_LABELS: Record<JobName, string> = {
   backup: "Backup",
   integrity_check: "Integrity Check",
+  macro_ingestion: "Macro Intelligence Ingestion",
   sec_filing_refresh: "SEC Filing Refresh",
   earnings_refresh: "Earnings Refresh",
   fmp_refresh: "FMP Fundamentals Refresh",
@@ -76,12 +85,16 @@ export const JOB_LABELS: Record<JobName, string> = {
   dossier_refresh: "Dossier Refresh",
   portfolio_review_refresh: "Portfolio Review Refresh",
   brain_os_export: "Brain OS Export",
+  morning_brief: "Morning Brief",
+  radar_refresh: "Discovery Radar",
+  portfolio_architect: "Portfolio Architect",
 };
 
 // Each job function returns a JobResult
 const JOB_RUNNERS: Record<JobName, () => Promise<JobResult>> = {
   backup: runBackup,
   integrity_check: runIntegrityCheck,
+  macro_ingestion: runMacroIngestion_,
   sec_filing_refresh: runSecFilingRefresh,
   earnings_refresh: runEarningsRefresh,
   fmp_refresh: runFmpRefresh,
@@ -90,9 +103,22 @@ const JOB_RUNNERS: Record<JobName, () => Promise<JobResult>> = {
   dossier_refresh: runDossierRefresh,
   portfolio_review_refresh: runPortfolioReviewRefresh,
   brain_os_export: runBrainOsExport,
+  morning_brief: runMorningBrief,
+  radar_refresh: runRadarRefresh,
+  portfolio_architect: runPortfolioArchitect,
 };
 
 // ─── Individual job implementations ──────────────────────────────────────────
+
+async function runMacroIngestion_(): Promise<JobResult> {
+  const apiKey = process.env.FMP_API_KEY;
+  if (!apiKey) {
+    return { success: false, summary: "Skipped — FMP_API_KEY not set", error: "FMP_API_KEY env var missing" };
+  }
+  const result = await runMacroIngestion(apiKey);
+  const summary = `Macro: ${result.macroPointsStored} FRED points, ${result.marketPointsStored} market points, ${result.geoEventsStored} geo events.${result.errors.length > 0 ? ` Errors: ${result.errors.slice(0, 2).join("; ")}` : ""}`;
+  return { success: result.errors.length === 0 || result.macroPointsStored + result.marketPointsStored > 0, summary };
+}
 
 async function runBackup(): Promise<JobResult> {
   const result = await backupFull("nightly");
@@ -230,6 +256,37 @@ async function runBrainOsExport(): Promise<JobResult> {
   return {
     success: true,
     summary: `Brain OS snapshot exported: ${result.filePath} (${(result.fileSize / 1024).toFixed(1)} KB)`,
+  };
+}
+
+async function runPortfolioArchitect(): Promise<JobResult> {
+  const data = await generateBlueprint();
+  const record = await saveBlueprint(data);
+  const topGap = data.gapAnalysis[0];
+  return {
+    success: true,
+    summary: `Blueprint generated: ${data.marketRegime} regime. ${data.gapAnalysis.length} gaps. ${topGap ? `Top gap: ${topGap.dimension} (${topGap.gap > 0 ? "+" : ""}${topGap.gap.toFixed(0)}%)` : "No critical gaps."}. Blueprint ID: ${record.id}`,
+  };
+}
+
+async function runRadarRefresh(): Promise<JobResult> {
+  const candidates = await generateRadarCandidates();
+  const saved = await saveRadarCandidates(candidates);
+  const topTicker = candidates[0]?.ticker ?? "—";
+  return {
+    success: true,
+    summary: `Discovery Radar: ${saved.length} candidates. Top: ${topTicker} (${candidates[0]?.radarScore?.toFixed(0) ?? 0})`,
+  };
+}
+
+async function runMorningBrief(): Promise<JobResult> {
+  const data = await generateMorningBrief();
+  const record = await saveMorningBrief(data);
+  const actionCount = data.recommendedActions.length;
+  const positivePct = data.portfolioImpact.positive.length;
+  return {
+    success: true,
+    summary: `Morning brief generated: ${data.marketRegime} regime. ${actionCount} actions. ${positivePct} positive positions. Brief ID: ${record.id}`,
   };
 }
 
@@ -395,6 +452,9 @@ function generateDailySummary(
 
   const oppResult = results.find(r => r.jobName === "opportunity_refresh");
   if (oppResult?.summary) lines.push(`Opportunities: ${oppResult.summary}`);
+
+  const briefResult = results.find(r => r.jobName === "morning_brief");
+  if (briefResult?.summary) lines.push(`Brief: ${briefResult.summary}`);
 
   if (failed.length > 0) {
     lines.push(`Failed: ${failed.map(f => JOB_LABELS[f.jobName as JobName] ?? f.jobName).join(", ")}`);

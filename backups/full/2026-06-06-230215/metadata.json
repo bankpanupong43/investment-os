@@ -1,0 +1,18 @@
+{
+  "label": "validate-full",
+  "ts": "2026-06-06-230215",
+  "createdAt": "2026-06-06T16:02:16.113Z",
+  "database": {
+    "path": "backups/full/2026-06-06-230215/dev.db",
+    "size": 1667072,
+    "checksum": "b26a9a00872e9e1887331dcbc043a859e23a48fc8d8fc24fbfb8316c33887395"
+  },
+  "brainOs": {
+    "id": "cmq2jk5900002lwsiyquk05a5",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-06-06-230215",
+    "fileSize": 1308842,
+    "checksum": "0cb053d8603f74c94e8467d9b07c403300804bee6382274618077ad55ce6731c",
+    "createdAt": "2026-06-06T16:02:15.829Z"
+  }
+}

@@ -1,7 +1,8 @@
 "use client";
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import type { OpportunityEntry, OpportunityResult, DisagreementOpportunity, AgreementOpportunity } from "@/app/api/opportunities/route";
 import type { FeedbackType } from "@/app/api/feedback/route";
+import { WatchlistButton } from "@/components/watchlist-button";
 
 // ─── Tier badge ───────────────────────────────────────────────────────────────
 
@@ -195,9 +196,9 @@ function OpportunityCard({ entry, onFeedback }: {
                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
                   style={{ backgroundColor: "#F0FDF4", color: "#15803D" }}>In Portfolio</span>
               )}
-              {entry.inWatchlist && (
+              {entry.inWatchlist && !expanded && (
                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
-                  style={{ backgroundColor: "#EEF3FD", color: "#3E6AE1" }}>Watchlist</span>
+                  style={{ backgroundColor: "#EEF3FD", color: "#3E6AE1" }}>Watching</span>
               )}
               {prefBadgeStyle && (
                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
@@ -358,6 +359,12 @@ function OpportunityCard({ entry, onFeedback }: {
 
           {/* Action + Generate Research */}
           <div className="flex items-center gap-2 flex-wrap">
+            <WatchlistButton
+              ticker={entry.ticker}
+              companyName={entry.companyName}
+              initiallyWatched={entry.inWatchlist}
+              size="sm"
+            />
             <span className="text-xs font-semibold px-3 py-1.5 rounded-lg"
               style={
                 entry.reasoning.positionType === "initiate" ? { backgroundColor: "#EEF3FD", color: "#3E6AE1" }
@@ -508,6 +515,9 @@ export default function OpportunitiesPage() {
   const [pageTab, setPageTab] = useState<PageTab>("recommended");
   const [feedbackMap, setFeedbackMap] = useState<Record<string, FeedbackType>>({});
   const [screenerData, setScreenerData] = useState<{ ticker: string; companyName: string; totalScore: number; universeTier: string; sector: string | null }[]>([]);
+  const [screenerError, setScreenerError] = useState<string | null>(null);
+  const [screenerLoading, setScreenerLoading] = useState(false);
+  const screenerFetchedRef = useRef(false);
 
   useEffect(() => {
     fetch("/api/opportunities")
@@ -527,15 +537,23 @@ export default function OpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-    if (pageTab !== "screener" || screenerData.length > 0) return;
+    if (pageTab !== "screener" || screenerFetchedRef.current) return;
+    screenerFetchedRef.current = true;
+    setScreenerLoading(true);
     fetch("/api/screener")
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(d => {
-        const entries = (d.scored ?? d.entries ?? []) as { ticker: string; companyName: string; totalScore: number; universeTier: string; sector: string | null }[];
-        setScreenerData([...entries].sort((a, b) => b.totalScore - a.totalScore));
+        type Row = { ticker: string; companyName: string; universeTier: string; sector: string | null; latestScore: { totalScore: number } | null };
+        const entries = (d.passed ?? d.all ?? []) as Row[];
+        setScreenerData(
+          entries
+            .map(e => ({ ticker: e.ticker, companyName: e.companyName, totalScore: e.latestScore?.totalScore ?? 0, universeTier: e.universeTier, sector: e.sector }))
+            .sort((a, b) => b.totalScore - a.totalScore)
+        );
       })
-      .catch(() => {});
-  }, [pageTab, screenerData.length]);
+      .catch(() => setScreenerError("Failed to load screener data."))
+      .finally(() => setScreenerLoading(false));
+  }, [pageTab]);
 
   const handleFeedback = useCallback((ticker: string, type: FeedbackType) => {
     setFeedbackMap(prev => ({ ...prev, [ticker]: type }));
@@ -798,8 +816,12 @@ export default function OpportunitiesPage() {
           {pageTab === "screener" && (
             <div>
               <p className="text-xs text-[#8E8E8E] mb-4">Universe ranked by company score. Use filters on the screener page for advanced filtering.</p>
-              {screenerData.length === 0 ? (
+              {screenerLoading ? (
                 <div className="py-8 text-center text-sm text-[#8E8E8E]">Loading screener data…</div>
+              ) : screenerError ? (
+                <div className="py-8 text-center text-sm text-[#c0392b]">{screenerError}</div>
+              ) : screenerData.length === 0 ? (
+                <div className="py-8 text-center text-sm text-[#8E8E8E]">No companies in universe yet.</div>
               ) : (
                 <div className="space-y-0">
                   {screenerData.map((e, i) => {

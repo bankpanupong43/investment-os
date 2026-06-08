@@ -17,6 +17,38 @@ const NAV_GROUPS = [
         ),
       },
       {
+        href: "/morning",
+        label: "Morning Brief",
+        icon: (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+          </svg>
+        ),
+      },
+      {
+        href: "/architect",
+        label: "Portfolio Architect",
+        icon: (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 20h20M6 20V10l6-6 6 6v10" />
+            <path d="M10 20v-5h4v5" />
+          </svg>
+        ),
+      },
+      {
+        href: "/radar",
+        label: "Discovery Radar",
+        icon: (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="2" />
+            <circle cx="12" cy="12" r="6" />
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="2" x2="12" y2="4" />
+          </svg>
+        ),
+      },
+      {
         href: "/portfolio",
         label: "Portfolio",
         icon: (
@@ -144,7 +176,7 @@ export function Sidebar() {
         </nav>
 
         <div className="px-5 py-4 border-t border-[#EEEEEE]">
-          <div className="text-xs text-[#AAAAAA]">Investment OS · 7 views</div>
+          <div className="text-xs text-[#AAAAAA]">Investment OS · 10 views</div>
         </div>
       </aside>
 

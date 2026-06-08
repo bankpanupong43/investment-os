@@ -1,0 +1,27 @@
+﻿src/agents/base.ts(44,21): error TS2769: No overload matches this call.
+  Overload 1 of 3, '(body: MessageCreateParamsNonStreaming, options?: RequestOptions<unknown> | undefined): APIPromise<Message>', gave the following error.
+    Type '"adaptive"' is not assignable to type '"enabled" | "disabled"'.
+  Overload 2 of 3, '(body: MessageCreateParamsStreaming, options?: RequestOptions<unknown> | undefined): APIPromise<Stream<RawMessageStreamEvent>>', gave the following error.
+    Type '"adaptive"' is not assignable to type '"enabled" | "disabled"'.
+  Overload 3 of 3, '(body: MessageCreateParamsBase, options?: RequestOptions<unknown> | undefined): APIPromise<Message | Stream<RawMessageStreamEvent>>', gave the following error.
+    Type '"adaptive"' is not assignable to type '"enabled" | "disabled"'.
+src/agents/team/risk-manager.ts(48,34): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(value: string | number | Date): Date', gave the following error.
+    Argument of type 'Date | null' is not assignable to parameter of type 'string | number | Date'.
+      Type 'null' is not assignable to type 'string | number | Date'.
+  Overload 2 of 4, '(value: string | number): Date', gave the following error.
+    Argument of type 'Date | null' is not assignable to parameter of type 'string | number'.
+      Type 'null' is not assignable to type 'string | number'.
+src/lib/thesis-integrity/engine.ts(451,21): error TS2769: No overload matches this call.
+  Overload 1 of 3, '(body: MessageCreateParamsNonStreaming, options?: RequestOptions<unknown> | undefined): APIPromise<Message>', gave the following error.
+    Type '"adaptive"' is not assignable to type '"enabled" | "disabled"'.
+  Overload 2 of 3, '(body: MessageCreateParamsStreaming, options?: RequestOptions<unknown> | undefined): APIPromise<Stream<RawMessageStreamEvent>>', gave the following error.
+    Type '"adaptive"' is not assignable to type '"enabled" | "disabled"'.
+  Overload 3 of 3, '(body: MessageCreateParamsBase, options?: RequestOptions<unknown> | undefined): APIPromise<Message | Stream<RawMessageStreamEvent>>', gave the following error.
+    Type '"adaptive"' is not assignable to type '"enabled" | "disabled"'.
+src/lib/thesis-integrity/engine.ts(576,46): error TS2339: Property 'recommendationReasoning' does not exist on type 'never'.
+src/lib/thesis-integrity/engine.ts(577,38): error TS2339: Property 'thesisReference' does not exist on type 'never'.
+src/tools/thesis-evaluation.ts(324,9): error TS2698: Spread types may only be created from object types.
+src/tools/thesis-evaluation.ts(325,9): error TS2698: Spread types may only be created from object types.
+src/tools/thesis-evaluation.ts(326,9): error TS2698: Spread types may only be created from object types.
+src/tools/thesis-evaluation.ts(327,9): error TS2698: Spread types may only be created from object types.
