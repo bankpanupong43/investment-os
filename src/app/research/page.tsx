@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { WatchlistButton } from "@/components/watchlist-button";
 import type { ResearchDossierData, FactItem } from "@/app/api/research/route";
 import type { OpportunityEntry, OpportunityResult } from "@/app/api/opportunities/route";
+import type { FMPSearchResult } from "@/lib/fmp-client";
 
 // ─── Strength / severity indicators ──────────────────────────────────────────
 
@@ -206,12 +207,69 @@ function EvidenceViewer({ d }: { d: ResearchDossierData }) {
 
 // ─── Dossier card ─────────────────────────────────────────────────────────────
 
-function DossierCard({ d }: { d: ResearchDossierData }) {
+function DossierCard({
+  d,
+  onRefresh,
+  refreshing,
+}: {
+  d: ResearchDossierData;
+  onRefresh?: (ticker: string) => void;
+  refreshing?: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const [addingToUniverse, setAddingToUniverse] = useState(false);
+  const [universeMsg, setUniverseMsg] = useState<string | null>(null);
   const scoreColor = d.opportunityScore >= 75 ? "#2d7d46" : d.opportunityScore >= 55 ? "#3E6AE1" : "#D97706";
   const fmtUsd = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+
+  const ageMs = Date.now() - new Date(d.generatedAt).getTime();
+  const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
+  const ageHours = Math.floor(ageMs / (1000 * 60 * 60));
+  const ageLabel = ageDays >= 1 ? `${ageDays}d ago` : ageHours >= 1 ? `${ageHours}h ago` : "just now";
+
+  // Derive source transparency from available data
+  const facts = d.facts ?? [];
+  const fmpSources: string[] = [];
+  if (d.investmentSummary.sector || d.investmentSummary.industry || d.investmentSummary.marketCapM) fmpSources.push("Profile");
+  if (facts.some(f => ["Gross Margin", "Operating Margin", "Debt/Equity"].includes(f.metric))) fmpSources.push("Ratios TTM");
+  if (facts.some(f => ["ROIC", "Free Cash Flow"].includes(f.metric))) fmpSources.push("Key Metrics TTM");
+  if (facts.some(f => ["Revenue Growth", "EPS Growth"].includes(f.metric))) fmpSources.push("Income Statement");
+
+  async function handleAddToUniverse() {
+    setAddingToUniverse(true);
+    setUniverseMsg(null);
+    try {
+      const createRes = await fetch("/api/universe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticker: d.ticker,
+          companyName: d.companyName,
+          sector: d.investmentSummary.sector ?? null,
+          industry: d.investmentSummary.industry ?? null,
+          marketCap: d.investmentSummary.marketCapM != null ? d.investmentSummary.marketCapM * 1_000_000 : null,
+          universeTier: "tier1",
+        }),
+      });
+      if (!createRes.ok) {
+        const body = await createRes.json();
+        throw new Error(body.error ?? `HTTP ${createRes.status}`);
+      }
+      // Ingest fundamentals via FMP
+      const ingestRes = await fetch(`/api/universe/${d.ticker}/ingest`, { method: "POST" });
+      const ingestBody = await ingestRes.json();
+      const status = ingestBody.status ?? "unknown";
+      setUniverseMsg(status === "success" || status === "partial"
+        ? "Added to Universe — fundamentals ingested."
+        : "Added to Universe (fundamentals pending).");
+    } catch (e) {
+      setUniverseMsg(e instanceof Error ? e.message : "Failed to add to universe");
+    } finally {
+      setAddingToUniverse(false);
+    }
+  }
 
   async function handleExport() {
     setExporting(true);
@@ -240,6 +298,9 @@ function DossierCard({ d }: { d: ResearchDossierData }) {
               )}
               {d.investmentSummary.inWatchlist && (
                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ backgroundColor: "#EEF3FD", color: "#3E6AE1" }}>Watchlist</span>
+              )}
+              {d.isOnDemand && (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ backgroundColor: "#F5F0FF", color: "#7C3AED" }}>Research Only</span>
               )}
               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#F4F4F4] text-[#5C5E62]">
                 Conviction {d.thesisDraft.confidence}/10
@@ -415,6 +476,16 @@ function DossierCard({ d }: { d: ResearchDossierData }) {
             </div>
           </section>
 
+          {/* Source transparency */}
+          {fmpSources.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-[#EEEEEE]">
+              <span className="text-[10px] text-[#AAAAAA]">FMP:</span>
+              {fmpSources.map(s => (
+                <span key={s} className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "#EEF3FD", color: "#3E6AE1" }}>{s}</span>
+              ))}
+            </div>
+          )}
+
           {/* Actions */}
           <div className="flex items-center gap-3 pt-1 flex-wrap">
             <WatchlistButton
@@ -423,6 +494,18 @@ function DossierCard({ d }: { d: ResearchDossierData }) {
               initiallyWatched={d.investmentSummary.inWatchlist}
               size="sm"
             />
+            {d.isOnDemand && !universeMsg && (
+              <button
+                onClick={handleAddToUniverse}
+                disabled={addingToUniverse}
+                className="text-xs font-medium px-3 py-1.5 rounded border border-[#EEEEEE] text-[#5C5E62] hover:border-[#7C3AED] hover:text-[#7C3AED] transition-colors disabled:opacity-40"
+              >
+                {addingToUniverse ? "Adding…" : "Add to Universe"}
+              </button>
+            )}
+            {universeMsg && (
+              <span className="text-xs" style={{ color: universeMsg.startsWith("Added") ? "#15803D" : "#DC2626" }}>{universeMsg}</span>
+            )}
             <button
               onClick={handleExport}
               disabled={exporting}
@@ -433,9 +516,212 @@ function DossierCard({ d }: { d: ResearchDossierData }) {
             {exportMsg && (
               <span className="text-xs text-[#5C5E62]">{exportMsg}</span>
             )}
-            <span className="text-xs text-[#AAAAAA] ml-auto">
-              Generated {new Date(d.generatedAt).toLocaleDateString()}
-            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-[11px] text-[#AAAAAA]">{ageLabel}</span>
+              {onRefresh && (
+                <button
+                  onClick={() => onRefresh(d.ticker)}
+                  disabled={refreshing}
+                  className="text-[11px] text-[#3E6AE1] hover:underline disabled:opacity-40"
+                >
+                  {refreshing ? "Refreshing…" : "Refresh"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Search Tab ──────────────────────────────────────────────────────────────
+
+function SearchTab({
+  dossiers,
+  onGenerate,
+  generatingTickers,
+}: {
+  dossiers: ResearchDossierData[];
+  onGenerate: (ticker: string, force?: boolean) => Promise<ResearchDossierData | null>;
+  generatingTickers: Set<string>;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<FMPSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [activeDossier, setActiveDossier] = useState<ResearchDossierData | null>(null);
+
+  const dossierMap = useMemo(
+    () => new Map(dossiers.map(d => [d.ticker, d])),
+    [dossiers]
+  );
+
+  const recentHistory = useMemo(
+    () => [...dossiers].sort((a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime()).slice(0, 10),
+    [dossiers]
+  );
+
+  async function handleSearch() {
+    const q = query.trim();
+    if (!q) return;
+    setSearching(true);
+    setSearchError(null);
+    setResults([]);
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setResults(data.results ?? []);
+      if ((data.results ?? []).length === 0) setSearchError("No results found.");
+    } catch (e) {
+      setSearchError(e instanceof Error ? e.message : "Search failed");
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function handleGenerate(ticker: string) {
+    const data = await onGenerate(ticker);
+    if (data) setActiveDossier(data);
+  }
+
+  async function handleRefreshResult(ticker: string) {
+    const data = await onGenerate(ticker, true);
+    if (data) setActiveDossier(data);
+  }
+
+  const ageLabel = (iso: string) => {
+    const ms = Date.now() - new Date(iso).getTime();
+    const d = Math.floor(ms / 86400000);
+    const h = Math.floor(ms / 3600000);
+    return d >= 1 ? `${d}d ago` : h >= 1 ? `${h}h ago` : "just now";
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Search input */}
+      <div>
+        <p className="text-xs text-[#8E8E8E] mb-3">
+          Search any stock — ticker or company name. Generate a research dossier for any result, even if it's not in your universe.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleSearch()}
+            placeholder="RKLB, Palantir, Rocket Lab…"
+            className="flex-1 text-sm border border-[#EEEEEE] rounded-lg px-3 py-2 text-[#171A20] placeholder:text-[#AAAAAA] focus:outline-none focus:border-[#3E6AE1]"
+          />
+          <button
+            onClick={handleSearch}
+            disabled={searching || !query.trim()}
+            className="text-sm font-medium px-4 py-2 rounded-lg text-white transition-opacity disabled:opacity-40"
+            style={{ backgroundColor: "#3E6AE1" }}
+          >
+            {searching ? "…" : "Search"}
+          </button>
+        </div>
+        {searchError && (
+          <p className="text-xs text-[#DC2626] mt-2">{searchError}</p>
+        )}
+      </div>
+
+      {/* Search results */}
+      {results.length > 0 && (
+        <div className="border border-[#EEEEEE] rounded-xl overflow-hidden">
+          <div className="px-4 py-2.5 bg-[#F4F4F4] border-b border-[#EEEEEE]">
+            <span className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide">{results.length} results</span>
+          </div>
+          {results.map(r => {
+            const existing = dossierMap.get(r.symbol);
+            const generating = generatingTickers.has(r.symbol);
+            return (
+              <div key={r.symbol} className="flex items-center gap-3 px-4 py-3 border-b border-[#EEEEEE] last:border-0">
+                <div className="w-16 font-semibold text-[#171A20] shrink-0">{r.symbol}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-medium text-[#171A20] truncate">{r.name}</div>
+                  <div className="text-[10px] text-[#AAAAAA]">
+                    {r.exchangeShortName ?? r.stockExchange ?? "—"}
+                    {r.currency ? ` · ${r.currency}` : ""}
+                  </div>
+                </div>
+                <div className="shrink-0 flex items-center gap-2">
+                  {existing && (
+                    <span className="text-[10px] text-[#AAAAAA]">{ageLabel(existing.generatedAt)}</span>
+                  )}
+                  <button
+                    onClick={() => {
+                      if (existing && !generating) {
+                        setActiveDossier(existing);
+                      } else {
+                        handleGenerate(r.symbol);
+                      }
+                    }}
+                    disabled={generating}
+                    className="text-[11px] font-medium px-2.5 py-1 rounded text-white transition-opacity disabled:opacity-40"
+                    style={{ backgroundColor: existing ? "#5C5E62" : "#3E6AE1", opacity: generating ? 0.6 : 1 }}
+                  >
+                    {generating ? "…" : existing ? "View" : "Generate Dossier"}
+                  </button>
+                  {existing && (
+                    <button
+                      onClick={() => handleRefreshResult(r.symbol)}
+                      disabled={generating}
+                      className="text-[11px] text-[#3E6AE1] hover:underline disabled:opacity-40"
+                    >
+                      Refresh
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Active dossier */}
+      {activeDossier && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide">Research Dossier</span>
+            <button onClick={() => setActiveDossier(null)} className="text-[11px] text-[#AAAAAA] hover:text-[#5C5E62]">Dismiss</button>
+          </div>
+          <DossierCard
+            d={activeDossier}
+            onRefresh={handleRefreshResult}
+            refreshing={generatingTickers.has(activeDossier.ticker)}
+          />
+        </div>
+      )}
+
+      {/* Recent history */}
+      {recentHistory.length > 0 && (
+        <div>
+          <div className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide mb-2">Recent Research</div>
+          <div className="border border-[#EEEEEE] rounded-xl overflow-hidden">
+            {recentHistory.map(d => (
+              <div
+                key={d.ticker}
+                className="flex items-center gap-3 px-4 py-2.5 border-b border-[#EEEEEE] last:border-0 cursor-pointer hover:bg-[#F8F9FB]"
+                onClick={() => setActiveDossier(d)}
+              >
+                <div className="w-16 font-semibold text-[#171A20] shrink-0">{d.ticker}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-[#5C5E62] truncate">{d.companyName}</div>
+                  {d.investmentSummary.sector && (
+                    <div className="text-[10px] text-[#AAAAAA]">{d.investmentSummary.sector}</div>
+                  )}
+                </div>
+                <div className="shrink-0 flex items-center gap-2">
+                  {d.isOnDemand && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "#F5F0FF", color: "#7C3AED" }}>Research Only</span>
+                  )}
+                  <span className="text-[10px] text-[#AAAAAA]">{ageLabel(d.generatedAt)}</span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -505,8 +791,9 @@ const TABS: { id: TabId; label: string }[] = [
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-type HubTab = "dossiers" | "filings" | "earnings" | "universe";
+type HubTab = "search" | "dossiers" | "filings" | "earnings" | "universe";
 const HUB_TABS: { id: HubTab; label: string }[] = [
+  { id: "search",    label: "Search" },
   { id: "dossiers",  label: "Dossiers" },
   { id: "filings",   label: "Filings" },
   { id: "earnings",  label: "Earnings" },
@@ -521,15 +808,15 @@ export default function ResearchPage() {
   const [dossiers, setDossiers] = useState<ResearchDossierData[]>([]);
   const [opportunities, setOpportunities] = useState<OpportunityEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [hubTab, setHubTab] = useState<HubTab>("dossiers");
+  const [hubTab, setHubTab] = useState<HubTab>("search");
   const [activeTab, setActiveTab] = useState<TabId>("queue");
   const [generatingTickers, setGeneratingTickers] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [filings, setFilings] = useState<FilingRow[]>([]);
   const [earnings, setEarnings] = useState<EarningsRow[]>([]);
   const [universe, setUniverse] = useState<UniverseRow[]>([]);
-  const [hubLoading, setHubLoading] = useState<Record<HubTab, boolean>>({ dossiers: false, filings: false, earnings: false, universe: false });
-  const hubFetchedRef = useRef<Record<HubTab, boolean>>({ dossiers: false, filings: false, earnings: false, universe: false });
+  const [hubLoading, setHubLoading] = useState<Record<HubTab, boolean>>({ search: false, dossiers: false, filings: false, earnings: false, universe: false });
+  const hubFetchedRef = useRef<Record<HubTab, boolean>>({ search: false, dossiers: false, filings: false, earnings: false, universe: false });
   const [hubErrors, setHubErrors] = useState<Partial<Record<HubTab, string>>>({});
 
   useEffect(() => {
@@ -583,11 +870,14 @@ export default function ResearchPage() {
     }
   }, [hubTab, filings.length, earnings.length, universe.length]);
 
-  const handleGenerate = useCallback(async (ticker: string) => {
+  const handleGenerate = useCallback(async (ticker: string, force = false) => {
     setGeneratingTickers(prev => new Set(prev).add(ticker));
     setError(null);
     try {
-      const res = await fetch(`/api/research/${ticker}/generate`, { method: "POST" });
+      const url = force
+        ? `/api/research/${ticker}/generate?force=true`
+        : `/api/research/${ticker}/generate`;
+      const res = await fetch(url, { method: "POST" });
       const data: ResearchDossierData = await res.json();
       if (!res.ok) throw new Error((data as unknown as { error: string }).error ?? "Generation failed");
       setDossiers(prev => {
@@ -595,13 +885,16 @@ export default function ResearchPage() {
         return [...filtered, data].sort((a, b) => b.opportunityScore - a.opportunityScore);
       });
       setActiveTab("dossiers");
+      return data;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Generation failed");
+      return null;
     } finally {
       setGeneratingTickers(prev => { const s = new Set(prev); s.delete(ticker); return s; });
     }
   }, []);
 
+  const handleRefresh = useCallback((ticker: string) => handleGenerate(ticker, true), [handleGenerate]);
   const dossierTickers = useMemo(() => new Set(dossiers.map(d => d.ticker)), [dossiers]);
 
   const queueEntries = useMemo(
@@ -680,6 +973,15 @@ export default function ResearchPage() {
         </div>
 
         <div className="p-4">
+          {/* ── Search hub tab ── */}
+          {hubTab === "search" && (
+            <SearchTab
+              dossiers={dossiers}
+              onGenerate={handleGenerate}
+              generatingTickers={generatingTickers}
+            />
+          )}
+
           {/* ── Dossiers hub tab ── */}
           {hubTab === "dossiers" && (
             <div className="space-y-4">
@@ -734,7 +1036,7 @@ export default function ResearchPage() {
                         {dossiers.length === 0 ? (
                           <div className="text-center py-8"><p className="text-sm text-[#8E8E8E]">No dossiers yet. Go to Research Queue and click Generate.</p></div>
                         ) : (
-                          dossiers.map(d => <DossierCard key={d.ticker} d={d} />)
+                          dossiers.map(d => <DossierCard key={d.ticker} d={d} onRefresh={handleRefresh} refreshing={generatingTickers.has(d.ticker)} />)
                         )}
                       </div>
                     )}

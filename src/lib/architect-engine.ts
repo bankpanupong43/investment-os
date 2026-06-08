@@ -421,32 +421,57 @@ async function determineRegime(
   return { regime, evidence: evidence.slice(0, 6) };
 }
 
+// ─── Allocation validation ────────────────────────────────────────────────────
+// The six asset-allocation dimensions (largeCap + midCap + smallCap +
+// international + hedge + cash) must always sum to exactly 100%.
+// growthPct and valuePct are style overlays — they are informational and are
+// NOT counted in the total.
+
+export function validateAllocation(alloc: BlueprintAllocation): {
+  valid: boolean;
+  total: number;
+  message: string;
+} {
+  const total = alloc.largeCap + alloc.midCap + alloc.smallCap
+              + alloc.international + alloc.hedge + alloc.cash;
+  const rounded = Math.round(total * 10) / 10;
+  const valid = Math.abs(total - 100) < 0.5;
+  return {
+    valid,
+    total: rounded,
+    message: valid
+      ? "Allocation sums to 100%"
+      : `Allocation sums to ${rounded}% — expected 100%`,
+  };
+}
+
 // ─── Target Allocation ────────────────────────────────────────────────────────
 
 function buildTargetAllocation(regime: Regime, state: PortfolioState): BlueprintAllocation {
-  // Base templates by regime
+  // Base templates — largeCap + midCap + smallCap + international + hedge + cash must = 100%
+  // growthPct / valuePct are style overlays (informational only, not counted in total).
   const base: Record<Regime, BlueprintAllocation> = {
-    "Risk On": { growthPct: 60, valuePct: 25, largeCap: 50, midCap: 20, smallCap: 15, international: 10, hedge: 5, cash: 5 },
-    "Neutral":  { growthPct: 45, valuePct: 35, largeCap: 55, midCap: 15, smallCap: 10, international: 10, hedge: 10, cash: 10 },
-    "Risk Off": { growthPct: 20, valuePct: 45, largeCap: 60, midCap: 10, smallCap: 5,  international: 5,  hedge: 20, cash: 25 },
+    "Risk On": { growthPct: 65, valuePct: 20, largeCap: 55, midCap: 15, smallCap: 10, international: 10, hedge:  5, cash:  5 },
+    "Neutral": { growthPct: 45, valuePct: 35, largeCap: 50, midCap: 10, smallCap:  5, international: 10, hedge: 10, cash: 15 },
+    "Risk Off": { growthPct: 20, valuePct: 50, largeCap: 40, midCap:  5, smallCap:  0, international:  5, hedge: 20, cash: 30 },
   };
+  // Verify templates at definition time (sums: 100, 100, 100 ✓)
 
   const alloc = { ...base[regime] };
 
-  // Adjustment: if tech sector overweight (>55%), increase hedge
+  // Adjustment: tech sector overweight (>55%) — shift 5% from largeCap to hedge
   const techPct = state.sectorBreakdown.find(s => s.sector === "Technology")?.pct ?? 0;
-  if (techPct > 55) {
-    alloc.hedge = Math.min(alloc.hedge + 5, 25);
+  if (techPct > 55 && alloc.largeCap >= 5) {
+    const shift = Math.min(5, alloc.largeCap, 25 - alloc.hedge);
+    alloc.hedge    += shift;
+    alloc.largeCap -= shift;
   }
 
-  // Adjustment: if no small caps in portfolio and regime is Risk On, keep recommendation
-  if (state.smallPct < 2 && regime === "Risk Off") {
-    alloc.smallCap = 0; // Don't recommend small cap in Risk Off
+  // Adjustment: no small caps in Risk Off — redistribute to largeCap
+  if (alloc.smallCap > 0 && state.smallPct < 2 && regime === "Risk Off") {
+    alloc.largeCap += alloc.smallCap;
+    alloc.smallCap  = 0;
   }
-
-  // Adjustment: position count
-  // If current count < 6, recommend allowing up to 15 positions
-  // If count > 12, recommend tightening to < 15
 
   return alloc;
 }

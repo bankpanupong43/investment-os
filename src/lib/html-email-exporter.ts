@@ -565,6 +565,70 @@ function emailSection8(doc: CIOBriefDocument): string {
   return sectionWrap("Sources", summary + `<ul style="margin:0;padding-left:18px;">${items}</ul>`);
 }
 
+// ─── Narrative Email ──────────────────────────────────────────────────────────
+// Simple <p>-only layout optimised for iPhone Speak Screen.
+// No tables, no badges, no special characters — just readable paragraphs.
+
+export function renderNarrativeEmail(narrative: string, doc: CIOBriefDocument): string {
+  const date = new Date(doc.date + "T00:00:00").toLocaleDateString("en-US", {
+    weekday: "long", year: "numeric", month: "long", day: "numeric",
+  });
+  const regime = doc.marketRegime;
+  const rc = REGIME_COLOR[regime] ?? REGIME_COLOR["Neutral"];
+  const qm = doc.qualityMetrics;
+
+  const htmlBody = narrative
+    .split(/\n\n+/)
+    .map(p => p.trim())
+    .filter(Boolean)
+    .map(p => `<p style="margin:0 0 22px;font-size:16px;line-height:1.75;color:#2d2d2d;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">${esc(p)}</p>`)
+    .join("\n");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Daily CIO Brief — ${esc(date)}</title>
+</head>
+<body style="margin:0;padding:0;background:#f0f0f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+<tr><td align="center" style="padding:20px 16px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"
+       style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+
+<tr><td style="background:#171a20;padding:28px 24px 20px;">
+  <p style="margin:0 0 4px;font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#aaaaaa;">Daily CIO Brief</p>
+  <h1 style="margin:0 0 12px;font-size:22px;font-weight:600;color:#ffffff;">${esc(date)}</h1>
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      <td style="background:${rc.bg};border:1px solid ${rc.border};border-radius:6px;padding:6px 14px;">
+        <span style="font-size:12px;font-weight:700;color:${rc.text};">${esc(regime)}</span>
+      </td>
+      <td style="padding-left:14px;">
+        <span style="font-size:11px;background:#2d3748;color:#a0aec0;padding:3px 8px;border-radius:4px;">~${qm.estimatedReadTimeMin} min · ${qm.evidenceCoveragePercent}% evidence</span>
+      </td>
+    </tr>
+  </table>
+</td></tr>
+
+<tr><td style="padding:28px 28px 8px;">
+${htmlBody}
+</td></tr>
+
+<tr><td style="padding:16px 24px;border-top:1px solid #eeeeee;">
+  <p style="margin:0;font-size:11px;color:#aaaaaa;text-align:center;">
+    Daily CIO Brief · ${esc(doc.date)} · Investment OS · High confidence: ${qm.highConfidenceCount} · Noise removed: ${qm.noiseRemovedCount}
+  </p>
+</td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
 // ─── Footer ───────────────────────────────────────────────────────────────────
 
 function emailFooter(doc: CIOBriefDocument): string {

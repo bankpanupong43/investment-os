@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { deserializeBrief } from "@/lib/morning-brief-engine";
 import { buildCIOBrief } from "@/lib/brief-generator";
-import { renderHtmlEmail } from "@/lib/html-email-exporter";
+import { renderNarrativeEmail } from "@/lib/html-email-exporter";
+import { renderNarrativeBrief } from "@/lib/narrative-brief";
 import { readArchiveEntry } from "@/lib/brief-archive-service";
 
 // GET /api/morning-brief/email-preview — HTML email for the latest (or ?date=) brief
@@ -39,7 +40,8 @@ export async function GET(req: NextRequest) {
 
   const briefData = deserializeBrief(record);
   const doc = await buildCIOBrief(briefData);
-  const html = renderHtmlEmail(doc);
+  const narrative = renderNarrativeBrief(doc);
+  const html = renderNarrativeEmail(narrative, doc);
 
   return new NextResponse(html, {
     headers: { "Content-Type": "text/html; charset=utf-8" },

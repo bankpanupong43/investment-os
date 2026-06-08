@@ -3,7 +3,8 @@ import { getEmailStatus, sendBriefEmailWithTracking } from "@/lib/email-service"
 import { db } from "@/lib/db";
 import { deserializeBrief } from "@/lib/morning-brief-engine";
 import { buildCIOBrief } from "@/lib/brief-generator";
-import { renderHtmlEmail } from "@/lib/html-email-exporter";
+import { renderNarrativeEmail } from "@/lib/html-email-exporter";
+import { renderNarrativeBrief } from "@/lib/narrative-brief";
 
 // GET /api/email — SMTP status + last send/failure
 export async function GET(_req: NextRequest): Promise<NextResponse> {
@@ -18,23 +19,23 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
 // POST /api/email — { action: "test" } sends the latest brief as a test email
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const body = await req.json().catch(() => ({}));
+    const body   = await req.json().catch(() => ({}));
     const action = body.action ?? "test";
 
     if (action !== "test") {
       return NextResponse.json({ error: "action must be 'test'" }, { status: 400 });
     }
 
-    // Fetch the latest brief from DB
     const record = await db.morningBrief.findFirst({ orderBy: { briefingDate: "desc" } });
     if (!record) {
       return NextResponse.json({ error: "No morning brief found. Generate one first." }, { status: 404 });
     }
 
     const briefData = deserializeBrief(record);
-    const doc = await buildCIOBrief(briefData);
-    const html = renderHtmlEmail(doc);
-    const summary = doc.executiveSummary?.join(" ") ?? briefData.marketRegime;
+    const doc       = await buildCIOBrief(briefData);
+    const narrative = renderNarrativeBrief(doc);
+    const html      = renderNarrativeEmail(narrative, doc);
+    const summary   = doc.executiveSummary?.join(" ") ?? briefData.marketRegime;
 
     const ok = await sendBriefEmailWithTracking(html, briefData.briefingDate, summary);
 

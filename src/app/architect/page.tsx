@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   PortfolioBlueprintData, Regime, GapItem,
 } from "@/lib/architect-engine";
+import { validateAllocation } from "@/lib/architect-engine";
 import type {
   PortfolioCapacity, OverexposureResult, BuyCandidate, SellFlag, CapitalDeployment,
 } from "@/lib/architect-v2";
@@ -145,14 +146,28 @@ function BlueprintTab({ blueprint, regime, onGenerate, generating }: {
       </div>
 
       <Section label="Target Allocation">
-        <div className="space-y-3">
-          <AllocationBar label="Large Cap"     pct={ta.largeCap}      color="#3E6AE1" />
-          <AllocationBar label="Mid Cap"       pct={ta.midCap}        color="#7c3aed" />
-          <AllocationBar label="Small Cap"     pct={ta.smallCap}      color="#b45309" />
-          <AllocationBar label="International" pct={ta.international} color="#2d7d46" />
-          <AllocationBar label="Hedge"         pct={ta.hedge}         color="#8E8E8E" />
-          <AllocationBar label="Cash"          pct={ta.cash}          color="#AAAAAA" />
-        </div>
+        {(() => {
+          const v = validateAllocation(ta);
+          return (
+            <div className="space-y-3">
+              <AllocationBar label="Large Cap"     pct={ta.largeCap}      color="#3E6AE1" />
+              <AllocationBar label="Mid Cap"       pct={ta.midCap}        color="#7c3aed" />
+              <AllocationBar label="Small Cap"     pct={ta.smallCap}      color="#b45309" />
+              <AllocationBar label="International" pct={ta.international} color="#2d7d46" />
+              <AllocationBar label="Hedge"         pct={ta.hedge}         color="#8E8E8E" />
+              <AllocationBar label="Cash"          pct={ta.cash}          color="#AAAAAA" />
+              <div className={`flex items-center justify-between pt-2 border-t border-[#EEEEEE] text-xs font-semibold ${v.valid ? "text-[#2d7d46]" : "text-[#c0392b]"}`}>
+                <span>Total</span>
+                <span>{v.total}%{!v.valid && " ⚠ expected 100%"}</span>
+              </div>
+              {!v.valid && (
+                <p className="text-xs text-[#c0392b] bg-[#fdf0ee] rounded px-2 py-1">
+                  Allocation mismatch: {v.message}
+                </p>
+              )}
+            </div>
+          );
+        })()}
       </Section>
 
       <Section label="Gap Analysis">

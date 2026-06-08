@@ -31,6 +31,15 @@ export function archiveBrief(date: Date, markdown: string, html: string): void {
   fs.writeFileSync(path.join(dir, `${dateStr}.html`), html,     "utf8");
 }
 
+/** Save narrative plain-text brief for a given date (English, backwards-compat). */
+export function archiveNarrative(date: Date, narrative: string): void {
+  const dir = getBriefDir();
+  if (!dir) return;
+  const dateStr = date.toISOString().split("T")[0];
+  fs.writeFileSync(path.join(dir, `${dateStr}-narrative.txt`), narrative, "utf8");
+}
+
+
 /** Returns list of archived dates (YYYY-MM-DD), newest first. */
 export function listArchive(): string[] {
   const dir = getBriefDir();

@@ -198,3 +198,40 @@ export async function fetchCompanyProfile(ticker: string, apiKey: string): Promi
     return null;
   }
 }
+
+// ─── Ticker search ────────────────────────────────────────────────────────────
+
+export interface FMPSearchResult {
+  symbol: string;
+  name: string;
+  currency: string | null;
+  stockExchange: string | null;
+  exchangeShortName: string | null;
+}
+
+interface FMPSearchSymbolRaw {
+  symbol: string;
+  name: string;
+  currency: string | null;
+  exchangeFullName: string | null;
+  exchange: string | null;
+}
+
+export async function searchTickers(query: string, apiKey: string, limit = 10): Promise<FMPSearchResult[]> {
+  try {
+    const url = `${STABLE}/search-symbol?query=${encodeURIComponent(query)}&limit=${limit}&apikey=${apiKey}`;
+    const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return [];
+    const body: unknown = await res.json();
+    if (!Array.isArray(body)) return [];
+    return (body as FMPSearchSymbolRaw[]).map(r => ({
+      symbol: r.symbol,
+      name: r.name,
+      currency: r.currency ?? null,
+      stockExchange: r.exchangeFullName ?? null,
+      exchangeShortName: r.exchange ?? null,
+    }));
+  } catch {
+    return [];
+  }
+}

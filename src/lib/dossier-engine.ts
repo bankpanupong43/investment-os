@@ -9,7 +9,8 @@ import { db } from "./db";
 import { loadBrainContext } from "./brain-os-context";
 import type { InvestmentPhilosophyContext } from "./brain-os-context";
 import { computeOpportunities, type OpportunityEntry } from "./opportunity-engine";
-import { fetchCompanyProfile, type FMPProfile } from "./fmp-client";
+import { fetchCompanyProfile, fetchFundamentals, type FMPProfile } from "./fmp-client";
+import { computeScores } from "./scoring-engine";
 import {
   collectFacts, generateInterpretations, generateRecommendation, buildEvidenceSummary,
   type FactItem, type InterpretationItem, type RecommendationSection, type EvidenceSummary,
@@ -103,6 +104,8 @@ export interface ResearchDossierData {
   interpretation: InterpretationItem[];
   recommendation: RecommendationSection;
   evidenceSummary: EvidenceSummary;
+  // Phase 13A
+  isOnDemand?: boolean;
 }
 
 // ─── Sector-specific content ───────────────────────────────────────────────────
@@ -670,6 +673,159 @@ export async function generateDossier(ticker: string, apiKey: string): Promise<R
   };
 }
 
+// ─── On-demand research (Phase 13A) ──────────────────────────────────────────
+// Generates a dossier for any ticker — no Universe membership required.
+// Fetches FMP data directly, builds a synthetic OpportunityEntry, runs the
+// same section generators as generateDossier().
+
+export async function generateDossierOnDemand(ticker: string, apiKey: string): Promise<ResearchDossierData> {
+  const t = ticker.toUpperCase();
+
+  const [profile, fundamentalsRaw, watchlistEntry, activePosition, settings] = await Promise.all([
+    apiKey ? fetchCompanyProfile(t, apiKey) : Promise.resolve(null),
+    apiKey ? fetchFundamentals(t, apiKey) : Promise.resolve(null),
+    db.watchlist.findUnique({ where: { ticker: t } }),
+    db.position.findFirst({ where: { ticker: t, status: "active" } }),
+    db.portfolioSettings.findFirst(),
+  ]);
+
+  const inWatchlist = watchlistEntry != null;
+  const inPortfolio = activePosition != null;
+  const totalCapitalUsd = settings?.totalCapitalUsd ?? 0;
+
+  const fundData = fundamentalsRaw ? {
+    grossMargin: fundamentalsRaw.grossMargin,
+    operatingMargin: fundamentalsRaw.operatingMargin,
+    revenueGrowth: fundamentalsRaw.revenueGrowth,
+    epsGrowth: fundamentalsRaw.epsGrowth,
+    freeCashFlow: fundamentalsRaw.freeCashFlow,
+    debtToEquity: fundamentalsRaw.debtToEquity,
+    roic: fundamentalsRaw.roic,
+  } : null;
+
+  const scores = computeScores(fundData);
+  const { totalScore } = scores;
+
+  const roic = fundData?.roic ?? 0;
+  const gm = fundData?.grossMargin ?? 0;
+  const brainAlignmentScore = roic >= 20 && gm >= 40
+    ? Math.min(85, totalScore)
+    : roic >= 10 && gm >= 30
+    ? Math.min(65, totalScore)
+    : Math.min(40, totalScore);
+
+  const suggestedAllocation = {
+    starterPct: 2.5,
+    starterUsd: Math.round(totalCapitalUsd * 0.025),
+    targetPct: 5,
+    targetUsd: Math.round(totalCapitalUsd * 0.05),
+    maxPct: 8,
+    maxUsd: Math.round(totalCapitalUsd * 0.08),
+  };
+
+  const entry: OpportunityEntry = {
+    ticker: t,
+    companyName: profile?.companyName ?? t,
+    universeTier: "tier1",
+    sector: profile?.sector ?? null,
+    assetType: "equity",
+    inPortfolio,
+    inWatchlist,
+    companyScore: Math.round(totalScore),
+    allocationGapScore: 0,
+    diversificationScore: 0,
+    watchlistScore: inWatchlist ? 100 : 0,
+    brainAlignmentScore: Math.round(brainAlignmentScore),
+    objectiveScore: Math.round(totalScore),
+    opportunityScore: Math.round(totalScore),
+    preferenceScore: 0,
+    userFeedback: null,
+    confidence: fundData ? Math.min(90, 40 + (fundamentalsRaw!.fieldsFound.length * 6)) : 20,
+    uncertaintyFactors: fundData ? [] : ["No fundamental data available from FMP"],
+    fundamentals: fundData,
+    allocationTarget: null,
+    currentValue: inPortfolio
+      ? { usd: activePosition.currentValueUsd ?? null, allocationPct: activePosition.allocationPct ?? null }
+      : null,
+    reasoning: {
+      positionType: inPortfolio ? "add" : "initiate",
+      whyBuy: "On-demand research",
+      whyNow: "",
+      portfolioImpact: "",
+    },
+    suggestedAllocation,
+    supportingFactors: [],
+    contradictingFactors: [],
+  };
+
+  // Build portfolio context for section generators
+  const positions = await db.position.findMany({ where: { status: "active" } });
+  const cashPos = positions.find(p => p.ticker === "CASH");
+  const availableCashUsd = cashPos?.currentValueUsd ?? 0;
+  const sectorExposures = new Map<string, number>();
+  for (const p of positions) {
+    if (p.ticker === "CASH" || !p.sector) continue;
+    const pct = p.allocationPct ?? 0;
+    if (pct > 0) sectorExposures.set(p.sector, (sectorExposures.get(p.sector) ?? 0) + pct);
+  }
+  const portfolioContext: PortfolioContext = {
+    sectorExposures, availableCashUsd, totalCapitalUsd,
+    positionCount: positions.filter(p => p.ticker !== "CASH").length,
+  };
+  const portfolioSectors = positions
+    .filter(p => p.ticker !== "CASH" && p.sector)
+    .map(p => `${p.sector}:${p.ticker}`);
+
+  const brainCtx = loadBrainContext();
+  const philosophy = brainCtx.investmentPhilosophy;
+
+  const businessOverview = generateBusinessOverview(entry, profile);
+  const whyBuy = generateWhyBuy(entry, portfolioContext);
+  const risks = generateRisks(entry, philosophy);
+  const portfolioFit = generatePortfolioFit(entry, portfolioSectors, philosophy);
+  const thesisDraft = generateThesisDraft(entry, whyBuy, businessOverview.description);
+
+  const investmentSummary: InvestmentSummary = {
+    ticker: t,
+    companyName: entry.companyName,
+    sector: profile?.sector ?? null,
+    industry: profile?.industry ?? null,
+    marketCapM: profile?.mktCap != null ? Math.round(profile.mktCap / 1_000_000) : null,
+    universeTier: entry.universeTier,
+    opportunityScore: entry.opportunityScore,
+    companyScore: entry.companyScore,
+    brainAlignmentScore: entry.brainAlignmentScore,
+    inPortfolio,
+    inWatchlist,
+    positionAction: entry.reasoning.positionType,
+  };
+
+  const facts = collectFacts(entry);
+  const interpretation = generateInterpretations(facts, entry);
+  const recommendation = generateRecommendation(facts, interpretation, entry);
+  const evidenceSummary = buildEvidenceSummary(facts, interpretation, entry);
+
+  return {
+    ticker: t,
+    companyName: entry.companyName,
+    generatedAt: new Date().toISOString(),
+    opportunityScore: entry.opportunityScore,
+    companyScore: entry.companyScore,
+    investmentSummary,
+    businessOverview,
+    whyBuy,
+    risks,
+    portfolioFit,
+    thesisDraft,
+    suggestedAllocation,
+    facts,
+    interpretation,
+    recommendation,
+    evidenceSummary,
+    isOnDemand: true,
+  };
+}
+
 export async function saveDossier(data: ResearchDossierData): Promise<void> {
   const evidenceFields = {
     facts: JSON.stringify(data.facts ?? []),
@@ -692,6 +848,7 @@ export async function saveDossier(data: ResearchDossierData): Promise<void> {
       thesisDraft: JSON.stringify(data.thesisDraft),
       suggestedAllocation: JSON.stringify(data.suggestedAllocation),
       generatedAt: new Date(),
+      isOnDemand: data.isOnDemand ?? false,
       ...evidenceFields,
     },
     create: {
@@ -706,6 +863,7 @@ export async function saveDossier(data: ResearchDossierData): Promise<void> {
       portfolioFit: JSON.stringify(data.portfolioFit),
       thesisDraft: JSON.stringify(data.thesisDraft),
       suggestedAllocation: JSON.stringify(data.suggestedAllocation),
+      isOnDemand: data.isOnDemand ?? false,
       ...evidenceFields,
     },
   });
@@ -734,7 +892,7 @@ export function parseDossierRow(row: {
   investmentSummary: string; businessOverview: string; whyBuy: string;
   risks: string; portfolioFit: string; thesisDraft: string; suggestedAllocation: string;
   facts?: string; interpretation?: string; recommendation?: string; evidenceSummary?: string;
-  generatedAt: Date;
+  generatedAt: Date; isOnDemand?: boolean;
 }): ResearchDossierData {
   return {
     ticker: row.ticker,
@@ -753,6 +911,7 @@ export function parseDossierRow(row: {
     interpretation: JSON.parse(row.interpretation ?? "[]"),
     recommendation: JSON.parse(row.recommendation ?? "{}"),
     evidenceSummary: JSON.parse(row.evidenceSummary ?? "{}"),
+    isOnDemand: row.isOnDemand ?? false,
   };
 }
 

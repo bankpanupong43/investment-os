@@ -286,20 +286,25 @@ async function runMorningBrief(): Promise<JobResult> {
   const data = await generateMorningBrief();
   const record = await saveMorningBrief(data);
 
-  // Build CIO brief document, archive to Brain OS/Morning Brief/, then email
+  // Build CIO brief document, generate narrative, archive to Brain OS, then email
   try {
     const { buildCIOBrief, renderCIOBriefMarkdown } = await import("./brief-generator");
-    const { renderHtmlEmail } = await import("./html-email-exporter");
-    const { archiveBrief } = await import("./brief-archive-service");
+    const { renderNarrativeEmail } = await import("./html-email-exporter");
+    const { renderNarrativeBrief } = await import("./narrative-brief");
+    const { archiveBrief, archiveNarrative } = await import("./brief-archive-service");
+
     const doc = await buildCIOBrief(data);
     const md = renderCIOBriefMarkdown(doc);
-    const html = renderHtmlEmail(doc);
-    archiveBrief(data.briefingDate, md, html);
+    const narrative = renderNarrativeBrief(doc);
+    const narrativeHtml = renderNarrativeEmail(narrative, doc);
 
-    // Send email — failure is recorded but does not fail morning_brief
+    archiveBrief(data.briefingDate, md, narrativeHtml);
+    archiveNarrative(data.briefingDate, narrative);
+
+    // Send narrative email — failure is recorded but does not fail morning_brief
     const { sendBriefEmailWithTracking } = await import("./email-service");
     const summary = doc.executiveSummary?.join(" ") ?? data.marketRegime;
-    await sendBriefEmailWithTracking(html, data.briefingDate, summary);
+    await sendBriefEmailWithTracking(narrativeHtml, data.briefingDate, summary);
   } catch (err) {
     console.error("[morning_brief] CIO brief archive/email failed:", err);
   }

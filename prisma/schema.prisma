@@ -548,6 +548,8 @@ model ResearchDossier {
   recommendation      String   @default("{}") // JSON: RecommendationSection
   evidenceSummary     String   @default("{}") // JSON: EvidenceSummary
   generatedAt         DateTime @default(now())
+  // Phase 13A: on-demand research (not universe-backed)
+  isOnDemand          Boolean  @default(false)
 
   @@index([opportunityScore])
   @@map("research_dossiers")

@@ -32,37 +32,67 @@ const FRED_SERIES: { id: string; metric: string }[] = [
   { id: "DGS2",            metric: "2Y Treasury Yield" },
 ];
 
-async function fetchFREDSeries(seriesId: string): Promise<{ date: Date; value: number } | null> {
+// Parse all valid rows from a FRED CSV response.
+function parseFREDRows(csvText: string): { date: Date; value: number }[] {
+  const lines = csvText.trim().split("\n");
+  const rows: { date: Date; value: number }[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const [dateStr, valStr] = line.split(",");
+    if (!dateStr || !valStr) continue;
+    if (valStr.trim() === "." || valStr.trim() === "") continue;
+    const value = parseFloat(valStr.trim());
+    if (isNaN(value)) continue;
+    const date = new Date(dateStr.trim() + "T00:00:00Z");
+    if (isNaN(date.getTime())) continue;
+    rows.push({ date, value });
+  }
+  return rows;
+}
+
+async function fetchFREDCSV(seriesId: string): Promise<string | null> {
   try {
-    const url = `${FRED_CSV}?id=${seriesId}`;
-    const res = await fetch(url, {
+    const res = await fetch(`${FRED_CSV}?id=${seriesId}`, {
       headers: { "User-Agent": "InvestmentOS/1.0 (personal-finance-app)" },
       cache: "no-store",
       signal: AbortSignal.timeout(12000),
     });
-    if (!res.ok) return null;
-
-    const text = await res.text();
-    const lines = text.trim().split("\n");
-
-    // FRED CSV: header row + data rows. Scan from the end for the most recent valid value.
-    // Missing values are represented as "." — skip them.
-    for (let i = lines.length - 1; i >= 1; i--) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      const [dateStr, valStr] = line.split(",");
-      if (!dateStr || !valStr) continue;
-      if (valStr.trim() === "." || valStr.trim() === "") continue;
-      const value = parseFloat(valStr.trim());
-      if (isNaN(value)) continue;
-      const date = new Date(dateStr.trim() + "T00:00:00Z");
-      if (isNaN(date.getTime())) continue;
-      return { date, value };
-    }
-    return null;
+    return res.ok ? await res.text() : null;
   } catch {
     return null;
   }
+}
+
+async function fetchFREDSeries(seriesId: string): Promise<{ date: Date; value: number } | null> {
+  const csv = await fetchFREDCSV(seriesId);
+  if (!csv) return null;
+  const rows = parseFREDRows(csv);
+  return rows.length > 0 ? rows[rows.length - 1] : null;
+}
+
+// For index-level series (CPIAUCSL, CPILFESL) compute year-over-year % change.
+// FRED returns the raw price index (~332); callers expect a percentage like 2.4%.
+async function fetchFREDSeriesYoY(seriesId: string): Promise<{ date: Date; value: number } | null> {
+  const csv = await fetchFREDCSV(seriesId);
+  if (!csv) return null;
+  const rows = parseFREDRows(csv);
+  if (rows.length < 2) return null;
+
+  const current = rows[rows.length - 1];
+  // Find the row closest to 12 months ago (within a 45-day window)
+  const targetMs = current.date.getTime() - 365 * 24 * 60 * 60 * 1000;
+  const yearAgo = rows.reduce((best, row) => {
+    const dist = Math.abs(row.date.getTime() - targetMs);
+    return dist < Math.abs(best.date.getTime() - targetMs) ? row : best;
+  });
+
+  // Sanity: year-ago must be at least 11 months back and no more than 14 months back
+  const monthsBack = (current.date.getTime() - yearAgo.date.getTime()) / (30.4 * 24 * 60 * 60 * 1000);
+  if (monthsBack < 11 || monthsBack > 14) return null;
+
+  const yoy = ((current.value - yearAgo.value) / yearAgo.value) * 100;
+  return { date: current.date, value: parseFloat(yoy.toFixed(2)) };
 }
 
 export async function fetchMacroData(): Promise<MacroDataPoint[]> {
@@ -70,7 +100,9 @@ export async function fetchMacroData(): Promise<MacroDataPoint[]> {
   const results: MacroDataPoint[] = [];
 
   for (const { id, metric } of FRED_SERIES) {
-    const data = await fetchFREDSeries(id);
+    // CPI index series need YoY computation; all other series are already rates/percentages
+    const isCpiIndex = id === "CPIAUCSL" || id === "CPILFESL";
+    const data = isCpiIndex ? await fetchFREDSeriesYoY(id) : await fetchFREDSeries(id);
     if (data) {
       results.push({
         metric,
