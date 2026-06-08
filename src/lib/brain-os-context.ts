@@ -1,7 +1,6 @@
 import fs from "fs";
 import path from "path";
-
-const BRAIN_OS_ROOT = "G:\\คอมพิวเตอร์เครื่องอื่นๆ\\คอมพิวเตอร์ของฉัน\\Shared\\Brain OS";
+import { resolveBrainOsPath } from "./shared-paths";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -93,8 +92,10 @@ const SOURCES: Record<string, string> = {
 };
 
 function readFile(relativePath: string): string | null {
+  const root = resolveBrainOsPath();
+  if (!root) return null;
   try {
-    const content = fs.readFileSync(path.join(BRAIN_OS_ROOT, relativePath), "utf-8");
+    const content = fs.readFileSync(path.join(root, relativePath), "utf-8");
     return content.trim().length > 10 ? content : null;
   } catch {
     return null;

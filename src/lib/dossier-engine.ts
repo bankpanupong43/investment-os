@@ -16,6 +16,7 @@ import {
 } from "./evidence-engine";
 import fs from "fs";
 import path from "path";
+import { resolveBrainOsPath } from "./shared-paths";
 
 // ─── Re-export evidence types for API routes ──────────────────────────────────
 
@@ -757,9 +758,6 @@ export function parseDossierRow(row: {
 
 // ─── Brain OS Export ──────────────────────────────────────────────────────────
 
-const BRAIN_OS_ROOT = "G:\\คอมพิวเตอร์เครื่องอื่นๆ\\คอมพิวเตอร์ของฉัน\\Shared\\Brain OS";
-const RESEARCH_EXPORT_DIR = path.join(BRAIN_OS_ROOT, "07 Investment", "Investment OS", "Research");
-
 function dossiersToMarkdown(data: ResearchDossierData): string {
   const fmtPct = (n: number) => `${n.toFixed(1)}%`;
   const fmtUsd = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
@@ -862,15 +860,17 @@ ${td.killCriteria.map(k => `- [ ] ${k}`).join("\n")}
 }
 
 export function exportDossierToBrainOS(data: ResearchDossierData): { success: boolean; path: string; error?: string } {
+  const brainOsRoot = resolveBrainOsPath();
+  const exportDir = brainOsRoot ? path.join(brainOsRoot, "07 Investment", "Investment OS", "Research") : "";
   try {
-    if (!fs.existsSync(BRAIN_OS_ROOT)) {
-      return { success: false, path: RESEARCH_EXPORT_DIR, error: "Brain OS vault not accessible at " + BRAIN_OS_ROOT };
+    if (!brainOsRoot) {
+      return { success: false, path: exportDir, error: "Brain OS vault not found. Set SHARED_ROOT env var or ensure shared folder is accessible." };
     }
-    fs.mkdirSync(RESEARCH_EXPORT_DIR, { recursive: true });
-    const filePath = path.join(RESEARCH_EXPORT_DIR, `${data.ticker}.md`);
+    fs.mkdirSync(exportDir, { recursive: true });
+    const filePath = path.join(exportDir, `${data.ticker}.md`);
     fs.writeFileSync(filePath, dossiersToMarkdown(data), "utf-8");
     return { success: true, path: filePath };
   } catch (e) {
-    return { success: false, path: RESEARCH_EXPORT_DIR, error: e instanceof Error ? e.message : String(e) };
+    return { success: false, path: exportDir, error: e instanceof Error ? e.message : String(e) };
   }
 }

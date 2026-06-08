@@ -28,6 +28,24 @@ interface IntegrityIssue {
   affectedIds?: string[];
 }
 
+interface EmailStatus {
+  configured: boolean;
+  host: string;
+  user: string;
+  to: string;
+  lastSentAt: string | null;
+  lastSentSubject: string | null;
+  lastFailedAt: string | null;
+  lastFailedError: string | null;
+}
+
+interface SharedStorageInfo {
+  path: string | null;
+  status: "connected" | "missing";
+  brainOsPath: string | null;
+  dataPath: string | null;
+}
+
 interface IntegrityReport {
   scannedAt: string;
   passedChecks: number;
@@ -66,20 +84,48 @@ function Badge({ severity }: { severity: IntegrityIssue["severity"] }) {
 export default function SystemPage() {
   const [report, setReport] = useState<BackupReport | null>(null);
   const [integrity, setIntegrity] = useState<IntegrityReport | null>(null);
+  const [storage, setStorage] = useState<SharedStorageInfo | null>(null);
+  const [emailStatus, setEmailStatus] = useState<EmailStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [runningBackup, setRunningBackup] = useState(false);
   const [runningIntegrity, setRunningIntegrity] = useState(false);
+  const [sendingTestEmail, setSendingTestEmail] = useState(false);
   const [msg, setMsg] = useState("");
 
   async function load() {
     setLoading(true);
-    const [r, i] = await Promise.all([
+    const [r, i, s, e] = await Promise.all([
       fetch("/api/backup?report=1").then(r => r.json()).catch(() => null),
       fetch("/api/integrity").then(r => r.json()).catch(() => null),
+      fetch("/api/system/shared-storage").then(r => r.json()).catch(() => null),
+      fetch("/api/email").then(r => r.json()).catch(() => null),
     ]);
     setReport(r);
     setIntegrity(i);
+    setStorage(s);
+    setEmailStatus(e);
     setLoading(false);
+  }
+
+  async function sendTestEmail() {
+    setSendingTestEmail(true);
+    setMsg("");
+    try {
+      const res = await fetch("/api/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "test" }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setMsg(data.message ?? "Test email sent.");
+        await load();
+      } else {
+        setMsg(`Error: ${data.error ?? "Email send failed"}`);
+      }
+    } finally {
+      setSendingTestEmail(false);
+    }
   }
 
   useEffect(() => { load(); }, []);
@@ -169,12 +215,91 @@ export default function SystemPage() {
         >
           {runningIntegrity ? "Scanning…" : "Run Integrity Check"}
         </button>
+        <button
+          onClick={sendTestEmail}
+          disabled={sendingTestEmail}
+          className="px-3 py-2 text-sm border border-[#EEEEEE] text-[#5C5E62] rounded hover:bg-[#F4F4F4] disabled:opacity-50"
+        >
+          {sendingTestEmail ? "Sending…" : "Send Test Email"}
+        </button>
       </div>
 
       {loading ? (
         <div className="text-sm text-[#8E8E8E]">Loading…</div>
       ) : (
         <>
+          {/* Email Delivery */}
+          <section>
+            <h2 className="text-sm font-medium text-[#5C5E62] uppercase tracking-wider mb-3">Email Delivery</h2>
+            {emailStatus ? (
+              <div className="space-y-3">
+                <div className={`border rounded-lg p-4 ${emailStatus.configured ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}>
+                  <div className="flex items-start justify-between flex-wrap gap-2">
+                    <div>
+                      <div className={`font-medium text-sm ${emailStatus.configured ? "text-green-700" : "text-amber-700"}`}>
+                        SMTP {emailStatus.configured ? "Configured" : "Not Configured"}
+                      </div>
+                      {emailStatus.configured && (
+                        <div className="text-xs text-[#5C5E62] mt-1 space-y-0.5">
+                          <div><span className="text-[#8E8E8E]">Host: </span><span className="font-mono">{emailStatus.host}</span></div>
+                          <div><span className="text-[#8E8E8E]">From: </span><span className="font-mono">{emailStatus.user}</span></div>
+                          <div><span className="text-[#8E8E8E]">To: </span><span className="font-mono">{emailStatus.to}</span></div>
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={sendTestEmail}
+                      disabled={sendingTestEmail || !emailStatus.configured}
+                      className="px-3 py-1.5 text-xs bg-[#171A20] text-white rounded hover:bg-[#2a2d35] disabled:opacity-50"
+                    >
+                      {sendingTestEmail ? "Sending…" : "Send Test Email"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white border border-[#EEEEEE] rounded-lg p-4">
+                    <div className="text-xs text-[#8E8E8E] mb-1">Last Email Sent</div>
+                    <div className="text-sm font-semibold text-[#171A20]">{fmt(emailStatus.lastSentAt)}</div>
+                    {emailStatus.lastSentSubject && (
+                      <div className="text-xs text-[#8E8E8E] mt-0.5 truncate">{emailStatus.lastSentSubject}</div>
+                    )}
+                  </div>
+                  <div className={`border rounded-lg p-4 ${emailStatus.lastFailedAt ? "bg-red-50 border-red-200" : "bg-white border-[#EEEEEE]"}`}>
+                    <div className={`text-xs mb-1 ${emailStatus.lastFailedAt ? "text-red-500" : "text-[#8E8E8E]"}`}>Last Failure</div>
+                    <div className={`text-sm font-semibold ${emailStatus.lastFailedAt ? "text-red-700" : "text-[#171A20]"}`}>{fmt(emailStatus.lastFailedAt)}</div>
+                    {emailStatus.lastFailedError && (
+                      <div className="text-xs text-red-500 mt-0.5 truncate">{emailStatus.lastFailedError}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-[#8E8E8E]">Loading email status…</div>
+            )}
+          </section>
+
+          {/* Shared Storage */}
+          <section>
+            <h2 className="text-sm font-medium text-[#5C5E62] uppercase tracking-wider mb-3">Shared Storage</h2>
+            <div className={`border rounded-lg p-4 ${storage?.status === "connected" ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className={`font-medium text-sm ${storage?.status === "connected" ? "text-green-700" : "text-red-700"}`}>
+                    {storage?.status === "connected" ? "Connected" : "Missing"}
+                  </div>
+                  <div className="text-xs font-mono text-[#5C5E62] mt-0.5">{storage?.path ?? "Not found"}</div>
+                </div>
+              </div>
+              {storage?.status === "connected" && (
+                <div className="mt-3 space-y-1 text-xs text-[#5C5E62]">
+                  <div><span className="text-[#8E8E8E]">Brain OS:&nbsp;</span><span className="font-mono">{storage.brainOsPath ?? "—"}</span></div>
+                  <div><span className="text-[#8E8E8E]">Data:&nbsp;</span><span className="font-mono">{storage.dataPath ?? "—"}</span></div>
+                </div>
+              )}
+            </div>
+          </section>
+
           {/* Backup stats */}
           <section>
             <h2 className="text-sm font-medium text-[#5C5E62] uppercase tracking-wider mb-3">Backup Status</h2>

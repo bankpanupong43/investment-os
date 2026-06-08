@@ -1,25 +1,19 @@
 #Requires -Version 5
 $ErrorActionPreference = 'Stop'
 
-# Wildcard discovery only — no hardcoded Thai paths
-$gdrive3 = Get-Item 'G:\*\*\*\investment-os-data' -ErrorAction SilentlyContinue |
-           Select-Object -First 1 -ExpandProperty FullName
+. "$PSScriptRoot\shared-paths.ps1"
+$sharedRoot = resolveSharedPath -CallerRoot $PSScriptRoot
 
-$gdrive2 = Get-Item 'G:\*\*\investment-os-data' -ErrorAction SilentlyContinue |
-           Select-Object -First 1 -ExpandProperty FullName
-
-$sibling = Join-Path $PSScriptRoot '..\shared\investment-os-data'
-
-$shared = @($gdrive3, $gdrive2, $sibling) |
-          Where-Object { $_ -and (Test-Path $_) } |
-          Select-Object -First 1
-
-if (-not $shared) {
-    Write-Host '[ERROR] Destination not found. Tried:'
-    Write-Host '        G:\*\*\*\investment-os-data'
-    Write-Host '        G:\*\*\investment-os-data'
-    Write-Host "        $sibling"
+if (-not $sharedRoot) {
+    Write-Host '[ERROR] Shared root not found. Set SHARED_ROOT env var or ensure the shared folder is accessible.'
     exit 1
+}
+
+$shared = Join-Path $sharedRoot 'investment-os-data'
+
+if (-not (Test-Path $shared)) {
+    New-Item -ItemType Directory -Path $shared -Force | Out-Null
+    Write-Host "[push-data] Created: $shared"
 }
 
 $srcDb  = Join-Path $PSScriptRoot 'prisma\dev.db'

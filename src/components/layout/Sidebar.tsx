@@ -17,8 +17,18 @@ const NAV_GROUPS = [
         ),
       },
       {
+        href: "/morning-brief",
+        label: "CIO Brief",
+        icon: (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="M7 8h10M7 12h10M7 16h6" />
+          </svg>
+        ),
+      },
+      {
         href: "/morning",
-        label: "Morning Brief",
+        label: "Morning Intelligence",
         icon: (
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="4" />
@@ -37,7 +47,7 @@ const NAV_GROUPS = [
         ),
       },
       {
-        href: "/radar",
+        href: "/discovery",
         label: "Discovery Radar",
         icon: (
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">

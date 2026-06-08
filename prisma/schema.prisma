@@ -27,19 +27,19 @@ model Position {
   // Snapshot fields — populated from portfolio tracking tools when share count / avg cost is unavailable
   currentValueUsd     Float?
   currentValueThb     Float?
-  allocationPct       Float?   // % of total portfolio at snapshot date
-  unrealizedReturnPct Float?   // unrealized gain/loss %
-  costBasisUsd        Float?   // derived: currentValueUsd / (1 + unrealizedReturnPct)
-  dataSource          String?  // origin of this data (e.g. "หุ้น.xlsx", "Dime app")
-  confidence          String?  // high | medium | low
+  allocationPct       Float? // % of total portfolio at snapshot date
+  unrealizedReturnPct Float? // unrealized gain/loss %
+  costBasisUsd        Float? // derived: currentValueUsd / (1 + unrealizedReturnPct)
+  dataSource          String? // origin of this data (e.g. "หุ้น.xlsx", "Dime app")
+  confidence          String? // high | medium | low
   snapshotDate        DateTime?
 
-  thesis           Thesis?
-  killConditions   KillCondition[]
-  journalEntries   JournalEntry[]
-  recommendations  Recommendation[]
-  newsItems        NewsItem[]
-  earningsEvents   EarningsEvent[]
+  thesis            Thesis?
+  killConditions    KillCondition[]
+  journalEntries    JournalEntry[]
+  recommendations   Recommendation[]
+  newsItems         NewsItem[]
+  earningsEvents    EarningsEvent[]
   thesisEvaluations ThesisEvaluation[]
 
   @@map("positions")
@@ -53,7 +53,7 @@ model Thesis {
   version    Int    @default(1) // increments on each formal revision
 
   // Core thesis text — immutable original, evolving assessment
-  originalThesis    String  // WHY you bought; never edited
+  originalThesis    String // WHY you bought; never edited
   currentAssessment String? // evolving view of thesis status
 
   // Structured components stored as JSON arrays (see TypeScript types)
@@ -63,7 +63,7 @@ model Thesis {
 
   // Time frame
   holdingPeriod       String? // human-readable: "3-5 years"
-  holdingPeriodMonths Int?    // for calculations: 36-60
+  holdingPeriodMonths Int? // for calculations: 36-60
 
   // Confidence at entry time (1-10) — set once, never changed
   // Use ThesisEvaluation.overallScore for ongoing strength
@@ -71,15 +71,15 @@ model Thesis {
 
   // Current health (updated by agents)
   healthStatus   String    @default("intact") // intact | weakening | broken | monitoring
-  healthScore    Int       @default(7)        // 0-10 current health, updated each evaluation
+  healthScore    Int       @default(7) // 0-10 current health, updated each evaluation
   lastReviewedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   position    Position           @relation(fields: [positionId], references: [id], onDelete: Cascade)
-  updates     ThesisUpdate[]     // incremental observations
-  versions    ThesisVersion[]    // full snapshots on formal revisions
+  updates     ThesisUpdate[] // incremental observations
+  versions    ThesisVersion[] // full snapshots on formal revisions
   evaluations ThesisEvaluation[] // AI scoring records
 
   @@map("theses")
@@ -98,15 +98,15 @@ model ThesisVersion {
 
   // Complete thesis state at this version
   thesisText       String
-  keyAssumptions   String @default("[]") // ThesisKeyAssumption[]
-  expectedOutcomes String @default("[]") // ExpectedOutcome[]
-  risks            String @default("[]") // ThesisRisk[]
+  keyAssumptions   String  @default("[]") // ThesisKeyAssumption[]
+  expectedOutcomes String  @default("[]") // ExpectedOutcome[]
+  risks            String  @default("[]") // ThesisRisk[]
   holdingPeriod    String?
   entryConfidence  Int
 
   // Why was this revision made?
-  revisionReason String  // required — forces you to articulate why the thesis changed
-  revisedBy      String  @default("manual") // manual | ai
+  revisionReason String // required — forces you to articulate why the thesis changed
+  revisedBy      String @default("manual") // manual | ai
 
   createdAt DateTime @default(now())
 
@@ -123,9 +123,9 @@ model ThesisVersion {
 model ThesisUpdate {
   id          String   @id @default(cuid())
   thesisId    String
-  updateType  String   // confirmation | weakening | neutral | breaking
+  updateType  String // confirmation | weakening | neutral | breaking
   content     String
-  triggeredBy String?  // earnings | news | manual | macro | price_action
+  triggeredBy String? // earnings | news | manual | macro | price_action
   sourceUrl   String?
   createdAt   DateTime @default(now())
 
@@ -160,16 +160,16 @@ model ThesisEvaluation {
   riskAssessments       String // RiskAssessment[]
 
   // Narrative
-  strengths            String  // what is confirmed and going well
-  concerns             String  // what is changing or at risk
-  scoreRationale       String  // brief explanation of overall score
+  strengths      String // what is confirmed and going well
+  concerns       String // what is changing or at risk
+  scoreRationale String // brief explanation of overall score
 
   // Recommendation output
-  recommendation       String  // hold | add | reduce | sell | watch
+  recommendation       String // hold | add | reduce | sell | watch
   recommendationReason String
-  thesisReference      String  // quote from originalThesis that informs this recommendation
+  thesisReference      String // quote from originalThesis that informs this recommendation
 
-  evaluatedBy String  @default("ai") // ai | manual
+  evaluatedBy String   @default("ai") // ai | manual
   modelUsed   String? // which AI model, e.g. claude-opus-4-8
   createdAt   DateTime @default(now())
 
@@ -184,10 +184,10 @@ model ThesisEvaluation {
 model KillCondition {
   id            String    @id @default(cuid())
   positionId    String
-  conditionType String    // quantitative | qualitative
+  conditionType String // quantitative | qualitative
   description   String
-  metric        String?   // e.g. "azure_growth_rate", "market_share"
-  operator      String?   // lt | gt | eq | lte | gte | drops_below
+  metric        String? // e.g. "azure_growth_rate", "market_share"
+  operator      String? // lt | gt | eq | lte | gte | drops_below
   threshold     Float?
   status        String    @default("active") // active | triggered | dismissed
   triggeredAt   DateTime?
@@ -206,7 +206,7 @@ model KillCondition {
 model JournalEntry {
   id         String   @id @default(cuid())
   positionId String?
-  entryType  String   // buy_rationale | thesis_update | decision | observation | earnings_note | macro | evaluation
+  entryType  String // buy_rationale | thesis_update | decision | observation | earnings_note | macro | evaluation
   content    String
   createdAt  DateTime @default(now())
 
@@ -220,12 +220,12 @@ model JournalEntry {
 model Recommendation {
   id              String    @id @default(cuid())
   positionId      String
-  action          String    // hold | add | reduce | sell | watch
+  action          String // hold | add | reduce | sell | watch
   reasoning       String
-  thesisReference String    // NON-NULLABLE: must quote the original thesis
+  thesisReference String // NON-NULLABLE: must quote the original thesis
   killConditionId String?
-  evaluationId    String?   // link to the ThesisEvaluation that generated this
-  confidence      Int?      // 1-5
+  evaluationId    String? // link to the ThesisEvaluation that generated this
+  confidence      Int? // 1-5
   urgency         String    @default("low") // low | medium | high | critical
   status          String    @default("pending") // pending | acknowledged | acted | dismissed
   acknowledgedAt  DateTime?
@@ -247,8 +247,8 @@ model NewsItem {
   content            String?
   source             String?
   url                String?
-  sentiment          String?   // positive | negative | neutral
-  thesisRelevance    String?   // high | medium | low | none
+  sentiment          String? // positive | negative | neutral
+  thesisRelevance    String? // high | medium | low | none
   relevanceReasoning String?
   publishedAt        DateTime?
   fetchedAt          DateTime  @default(now())
@@ -264,21 +264,21 @@ model EarningsEvent {
   id                    String    @id @default(cuid())
   positionId            String?
   ticker                String
-  fiscalQuarter         Int?      // 1–4
-  fiscalYear            Int?      // e.g. 2024
-  fiscalPeriod          String?   // human-readable: "Q1 2024"
+  fiscalQuarter         Int? // 1–4
+  fiscalYear            Int? // e.g. 2024
+  fiscalPeriod          String? // human-readable: "Q1 2024"
   reportDate            DateTime?
   epsActual             Float?
   epsEstimate           Float?
   revenueActual         Float?
   revenueEstimate       Float?
   guidanceSummary       String?
-  transcript            String?   // full call transcript (if available)
-  managementCommentary  String?   // extracted key management commentary
-  keyMetrics            String?   // JSON: Record<string, string | number>
-  thesisImpact          String?   // positive | negative | neutral | n/a
-  thesisAssumptionsHit  String?   // JSON: {assumption: string, result: "met"|"missed"|"n/a"}[]
-  killConditionsChecked String?   // JSON: {conditionId: string, triggered: boolean}[]
+  transcript            String? // full call transcript (if available)
+  managementCommentary  String? // extracted key management commentary
+  keyMetrics            String? // JSON: Record<string, string | number>
+  thesisImpact          String? // positive | negative | neutral | n/a
+  thesisAssumptionsHit  String? // JSON: {assumption: string, result: "met"|"missed"|"n/a"}[]
+  killConditionsChecked String? // JSON: {conditionId: string, triggered: boolean}[]
   createdAt             DateTime  @default(now())
 
   position Position? @relation(fields: [positionId], references: [id], onDelete: SetNull)
@@ -292,13 +292,13 @@ model EarningsEvent {
 model Filing {
   id              String    @id @default(cuid())
   ticker          String
-  filingType      String    // 10-K | 10-Q | 8-K | 20-F
+  filingType      String // 10-K | 10-Q | 8-K | 20-F
   accessionNumber String    @unique
   filingDate      DateTime
   periodEndDate   DateTime?
   title           String    @default("")
-  summary         String?   // AI-generated summary
-  rawContent      String?   // full extracted text
+  summary         String? // AI-generated summary
+  rawContent      String? // full extracted text
   sourceUrl       String?
   createdAt       DateTime  @default(now())
 
@@ -316,9 +316,9 @@ model ThesisImpactRecord {
   id             String   @id @default(cuid())
   filingId       String
   ticker         String
-  impactLevel    String   // intact | strengthened | weakened | kill_criteria_triggered
-  impactedThesis String   // which thesis / thesis aspect is impacted
-  reasoning      String   // why this impact was assessed
+  impactLevel    String // intact | strengthened | weakened | kill_criteria_triggered
+  impactedThesis String // which thesis / thesis aspect is impacted
+  reasoning      String // why this impact was assessed
   evidenceIds    String   @default("[]") // JSON: string[] — references to fact IDs or filing excerpts
   createdAt      DateTime @default(now())
 
@@ -352,15 +352,15 @@ model Watchlist {
 // the PM reads all briefings and produces the final synthesis + decisions.
 
 model TeamSession {
-  id          String    @id @default(cuid())
-  triggerType String    // morning_review | earnings_event | news_event | weekly_review | manual | idea_generation
-  triggerNote String?   // human-readable description of what prompted this session
-  tickers     String    @default("[]") // JSON: string[] of relevant tickers
-  status      String    @default("running") // running | complete | failed
+  id          String  @id @default(cuid())
+  triggerType String // morning_review | earnings_event | news_event | weekly_review | manual | idea_generation
+  triggerNote String? // human-readable description of what prompted this session
+  tickers     String  @default("[]") // JSON: string[] of relevant tickers
+  status      String  @default("running") // running | complete | failed
 
   // PM final output
-  finalSynthesis   String?  // JSON: PortfolioManagerDecision
-  decisionsCreated Int      @default(0)
+  finalSynthesis   String? // JSON: PortfolioManagerDecision
+  decisionsCreated Int     @default(0)
 
   startedAt   DateTime  @default(now())
   completedAt DateTime?
@@ -377,10 +377,10 @@ model TeamSession {
 model AgentBriefing {
   id        String   @id @default(cuid())
   sessionId String
-  agentRole String   // portfolio_manager | thesis_analyst | news_analyst | earnings_analyst | risk_manager | idea_generator
-  ticker    String?  // populated when briefing is position-specific
-  report    String   // JSON typed report (see src/types/team.ts)
-  summary   String   // 2-3 sentence plaintext summary for quick scanning
+  agentRole String // portfolio_manager | thesis_analyst | news_analyst | earnings_analyst | risk_manager | idea_generator
+  ticker    String? // populated when briefing is position-specific
+  report    String // JSON typed report (see src/types/team.ts)
+  summary   String // 2-3 sentence plaintext summary for quick scanning
   createdAt DateTime @default(now())
 
   session TeamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
@@ -394,10 +394,10 @@ model AgentBriefing {
 model PortfolioSettings {
   id              String   @id @default(cuid())
   label           String   @default("Main Portfolio")
-  totalCapitalThb Float    // ฿1,300,000 — audited total invested capital
-  totalCapitalUsd Float    // $39,816.22 at seed-time exchange rate
-  exchangeRate    Float    // 32.65 THB/USD at seed time
-  source          String?  // data provenance note
+  totalCapitalThb Float // ฿1,300,000 — audited total invested capital
+  totalCapitalUsd Float // $39,816.22 at seed-time exchange rate
+  exchangeRate    Float // 32.65 THB/USD at seed time
+  source          String? // data provenance note
   updatedAt       DateTime @updatedAt
 
   @@map("portfolio_settings")
@@ -411,11 +411,11 @@ model AllocationTarget {
   id        String   @id @default(cuid())
   ticker    String   @unique
   name      String
-  targetPct Float    // 0–100, percentage of totalCapitalUsd
-  targetUsd Float    // absolute USD target amount
-  targetThb Float    // absolute THB target amount
-  bucket    String   // growth | core | small | defensive | value
-  priority  Int      // buy priority rank — lower = buy first
+  targetPct Float // 0–100, percentage of totalCapitalUsd
+  targetUsd Float // absolute USD target amount
+  targetThb Float // absolute THB target amount
+  bucket    String // growth | core | small | defensive | value
+  priority  Int // buy priority rank — lower = buy first
   notes     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -433,24 +433,24 @@ model PortfolioReview {
   notes       String?
 
   // Section analysis — JSON strings
-  portfolioSummary          String  // JSON: PortfolioSummary
-  allocationAnalysis        String  // JSON: AllocationAnalysis
-  thesisCoverageAnalysis    String  // JSON: ThesisCoverageAnalysis
-  riskAnalysis              String  // JSON: RiskAnalysis
-  cashAllocationReview      String  // JSON: CashAllocationReview
-  watchlistPrioritization   String  // JSON: WatchlistPrioritization
+  portfolioSummary        String // JSON: PortfolioSummary
+  allocationAnalysis      String // JSON: AllocationAnalysis
+  thesisCoverageAnalysis  String // JSON: ThesisCoverageAnalysis
+  riskAnalysis            String // JSON: RiskAnalysis
+  cashAllocationReview    String // JSON: CashAllocationReview
+  watchlistPrioritization String // JSON: WatchlistPrioritization
 
   // AI review cards — JSON strings
-  biggestRisk        String  // JSON: ReviewCard
-  biggestOpportunity String  // JSON: ReviewCard
-  mostUnderallocated String  // JSON: ReviewCard
-  weakestThesis      String  // JSON: ReviewCard
-  reviewsDue         String  // JSON: ReviewCard[]
+  biggestRisk        String // JSON: ReviewCard
+  biggestOpportunity String // JSON: ReviewCard
+  mostUnderallocated String // JSON: ReviewCard
+  weakestThesis      String // JSON: ReviewCard
+  reviewsDue         String // JSON: ReviewCard[]
 
   // Filing intelligence cards (Phase 5E)
-  filingsRequiringReview String  @default("[]") // JSON: ReviewCard[]
-  thesisAlerts           String  @default("[]") // JSON: ReviewCard[]
-  newRisksDetected       String  @default("[]") // JSON: ReviewCard[]
+  filingsRequiringReview String @default("[]") // JSON: ReviewCard[]
+  thesisAlerts           String @default("[]") // JSON: ReviewCard[]
+  newRisksDetected       String @default("[]") // JSON: ReviewCard[]
 
   // Brain OS context that was active when this review was generated
   brainContextReport String? // JSON: BrainOSContext | null
@@ -471,8 +471,8 @@ model Universe {
   exchange     String?
   sector       String?
   industry     String?
-  marketCap    Float?   // USD millions
-  universeTier String   // tier1 | tier2 | tier3 | tier4 | tier5
+  marketCap    Float? // USD millions
+  universeTier String // tier1 | tier2 | tier3 | tier4 | tier5
   country      String   @default("US")
   assetType    String   @default("equity") // equity | etf
   status       String   @default("active") // active | excluded | delisted
@@ -491,14 +491,14 @@ model Universe {
 model Fundamental {
   id                String   @id @default(cuid())
   universeId        String   @unique
-  revenueGrowth     Float?   // YoY %
-  epsGrowth         Float?   // YoY %
-  grossMargin       Float?   // % (0-100)
-  operatingMargin   Float?   // % (0-100)
-  freeCashFlow      Float?   // USD millions
+  revenueGrowth     Float? // YoY %
+  epsGrowth         Float? // YoY %
+  grossMargin       Float? // % (0-100)
+  operatingMargin   Float? // % (0-100)
+  freeCashFlow      Float? // USD millions
   debtToEquity      Float?
-  roic              Float?   // % (0-100)
-  sharesOutstanding Float?   // millions
+  roic              Float? // % (0-100)
+  sharesOutstanding Float? // millions
   updatedAt         DateTime @updatedAt
 
   universe Universe @relation(fields: [universeId], references: [id], onDelete: Cascade)
@@ -512,12 +512,12 @@ model Fundamental {
 model UniverseScore {
   id                String   @id @default(cuid())
   universeId        String
-  businessQuality   Float    // 0-100
-  growth            Float    // 0-100
-  financialStrength Float    // 0-100
-  capitalAllocation Float    // 0-100
-  valuation         Float    // 0-100 (placeholder until price data)
-  totalScore        Float    // 0-100
+  businessQuality   Float // 0-100
+  growth            Float // 0-100
+  financialStrength Float // 0-100
+  capitalAllocation Float // 0-100
+  valuation         Float // 0-100 (placeholder until price data)
+  totalScore        Float // 0-100
   scoredAt          DateTime @default(now())
 
   universe Universe @relation(fields: [universeId], references: [id], onDelete: Cascade)
@@ -560,15 +560,15 @@ model ResearchDossier {
 model Evidence {
   id           String   @id @default(cuid())
   ticker       String
-  factId       String   // matches FactItem.id in the dossier JSON (e.g. "MSFT_001")
-  category     String   // Fundamentals | Portfolio | Opportunity | BrainContext | Research
+  factId       String // matches FactItem.id in the dossier JSON (e.g. "MSFT_001")
+  category     String // Fundamentals | Portfolio | Opportunity | BrainContext | Research
   metric       String
   value        String
   numericValue Float?
   unit         String?
   source       String
   sourceDate   String?
-  confidence   String   // high | medium | low
+  confidence   String // high | medium | low
   createdAt    DateTime @default(now())
 
   @@index([ticker])
@@ -603,8 +603,8 @@ model OpportunityScore {
 model IngestionLog {
   id            String   @id @default(cuid())
   ticker        String
-  source        String   // fmp | manual | seed
-  status        String   // success | partial | failed | skipped
+  source        String // fmp | manual | seed
+  status        String // success | partial | failed | skipped
   fieldsUpdated String   @default("[]") // JSON: string[]
   fieldsMissing String   @default("[]") // JSON: string[]
   errorMessage  String?
@@ -621,7 +621,7 @@ model IngestionLog {
 model RecommendationFeedback {
   id           String   @id @default(cuid())
   ticker       String
-  feedbackType String   // interested | not_interested | already_owned | disagree | researching
+  feedbackType String // interested | not_interested | already_owned | disagree | researching
   notes        String?
   createdAt    DateTime @default(now())
 
@@ -635,10 +635,10 @@ model RecommendationFeedback {
 
 model Backup {
   id         String   @id @default(cuid())
-  backupType String   // database | brain_os_export | full_snapshot
-  filePath   String   // path relative to project root
-  fileSize   Int      // bytes
-  checksum   String   // SHA256
+  backupType String // database | brain_os_export | full_snapshot
+  filePath   String // path relative to project root
+  fileSize   Int // bytes
+  checksum   String // SHA256
   metadata   String   @default("{}") // JSON: label, restore info, etc.
   createdAt  DateTime @default(now())
 
@@ -651,12 +651,12 @@ model Backup {
 
 model Job {
   id            String    @id @default(cuid())
-  jobName       String    // backup | integrity_check | sec_filing_refresh | etc.
+  jobName       String // backup | integrity_check | sec_filing_refresh | etc.
   status        String    @default("pending") // pending | running | completed | failed | skipped
   startedAt     DateTime  @default(now())
   completedAt   DateTime?
   durationMs    Int?
-  resultSummary String?   // human-readable one-line result
+  resultSummary String? // human-readable one-line result
   errorMessage  String?
 
   @@index([jobName])
@@ -675,12 +675,12 @@ model CommitteeSession {
   companyName    String   @default("")
   sector         String?
   universeTier   String   @default("tier1")
-  bullCase       String   // JSON: BullCase
-  bearCase       String   // JSON: BearCase
-  riskAssessment String   // JSON: RiskAssessment
-  thesisAudit    String   // JSON: ThesisAudit
-  finalDecision  String   // JSON: FinalDecision
-  conviction     String   // Strong Buy | Buy | Watch | Hold | Pass
+  bullCase       String // JSON: BullCase
+  bearCase       String // JSON: BearCase
+  riskAssessment String // JSON: RiskAssessment
+  thesisAudit    String // JSON: ThesisAudit
+  finalDecision  String // JSON: FinalDecision
+  conviction     String // Strong Buy | Buy | Watch | Hold | Pass
   createdAt      DateTime @default(now())
 
   @@index([ticker])
@@ -692,8 +692,8 @@ model CommitteeSession {
 
 model Brief {
   id          String    @id @default(cuid())
-  briefType   String    // morning | weekly
-  content     String    // markdown
+  briefType   String // morning | weekly
+  content     String // markdown
   deliveredAt DateTime?
   createdAt   DateTime  @default(now())
 
@@ -706,8 +706,8 @@ model Brief {
 
 model MorningBrief {
   id                   String   @id @default(cuid())
-  briefingDate         DateTime @unique  // date portion only; one per day
-  marketRegime         String   // "Risk On" | "Neutral" | "Risk Off"
+  briefingDate         DateTime @unique // date portion only; one per day
+  marketRegime         String // "Risk On" | "Neutral" | "Risk Off"
   marketRegimeEvidence String   @default("[]") // JSON: string[]
   macroSummary         String   @default("{}") // JSON: MacroSummary
   geopoliticalSummary  String   @default("{}") // JSON: GeopoliticalSummary
@@ -729,11 +729,11 @@ model DiscoveryCandidate {
   id              String    @id @default(cuid())
   ticker          String    @unique
   companyName     String
-  marketCap       Float?    // USD millions
-  category        String    // small_cap | mid_cap | large_cap | etf | special_situation
-  discoveryReason String    // primary signal that surfaced this ticker
-  radarScore      Float     // 0-100 composite score
-  confidence      String    // high | medium | low
+  marketCap       Float? // USD millions
+  category        String // small_cap | mid_cap | large_cap | etf | special_situation
+  discoveryReason String // primary signal that surfaced this ticker
+  radarScore      Float // 0-100 composite score
+  confidence      String // high | medium | low
   themes          String    @default("[]") // JSON: string[] — matching discovery themes
   signals         String    @default("[]") // JSON: RadarSignal[] — all contributing signals
   sources         String    @default("[]") // JSON: string[] — which sources flagged this
@@ -757,15 +757,15 @@ model InvestmentThesis {
   id              String    @id @default(cuid())
   ticker          String    @unique
   title           String
-  thesis          String    // Core investment thesis — why you own or want to own this
-  whyOwn          String    // One-paragraph ownership rationale
-  risks           String    // Key risks in plain text
-  killCriteria    String    // Concrete conditions that would cause an exit
-  confidenceScore Int       @default(7)          // 1–10; 10 = highest conviction
+  thesis          String // Core investment thesis — why you own or want to own this
+  whyOwn          String // One-paragraph ownership rationale
+  risks           String // Key risks in plain text
+  killCriteria    String // Concrete conditions that would cause an exit
+  confidenceScore Int       @default(7) // 1–10; 10 = highest conviction
   reviewFrequency String    @default("quarterly") // monthly | quarterly | annually
   lastReviewedAt  DateTime?
-  status          String    @default("active")   // active | watchlist | closed
-  isDraft         Boolean   @default(true)        // true = AI-generated draft, needs human review
+  status          String    @default("active") // active | watchlist | closed
+  isDraft         Boolean   @default(true) // true = AI-generated draft, needs human review
   notes           String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -781,7 +781,7 @@ model InvestmentThesis {
 model ThesisReview {
   id                 String   @id @default(cuid())
   thesisId           String
-  reviewType         String   // review_completed | confidence_changed
+  reviewType         String // review_completed | confidence_changed
   previousConfidence Int?
   newConfidence      Int?
   notes              String?
@@ -800,18 +800,18 @@ model PortfolioBlueprint {
   id            String   @id @default(cuid())
   blueprintDate DateTime @unique // date portion only; one per day
 
-  marketRegime   String            // "Risk On" | "Neutral" | "Risk Off"
+  marketRegime   String // "Risk On" | "Neutral" | "Risk Off"
   regimeEvidence String @default("[]") // JSON: string[]
 
   // Target allocation % (regime-adaptive)
-  growthAllocation        Float
-  valueAllocation         Float
-  largeCap                Float
-  midCap                  Float
-  smallCap                Float
-  international           Float
-  hedgeAllocation         Float
-  cashAllocation          Float
+  growthAllocation Float
+  valueAllocation  Float
+  largeCap         Float
+  midCap           Float
+  smallCap         Float
+  international    Float
+  hedgeAllocation  Float
+  cashAllocation   Float
 
   // Concentration rules
   maxPositions      Int   @default(20)
@@ -837,11 +837,11 @@ model PortfolioBlueprint {
 // One record per metric per release date. Updated by macro_ingestion job.
 
 model MacroSnapshot {
-  id          Int      @id @default(autoincrement())
+  id          Int       @id @default(autoincrement())
   date        DateTime // observation date from FRED (e.g. 2025-04-01 for April CPI)
-  metric      String   // "CPI" | "Core CPI" | "Fed Funds Rate" | "Unemployment" | "GDP Growth" | "10Y Treasury Yield" | "2Y Treasury Yield"
+  metric      String // "CPI" | "Core CPI" | "Fed Funds Rate" | "Unemployment" | "GDP Growth" | "10Y Treasury Yield" | "2Y Treasury Yield"
   value       Float
-  source      String   // "FRED"
+  source      String // "FRED"
   releaseDate DateTime? // when this data point was ingested
 
   createdAt DateTime @default(now())
@@ -859,7 +859,7 @@ model MacroSnapshot {
 model MarketSnapshot {
   id     Int      @id @default(autoincrement())
   date   DateTime // trading day (time portion zeroed)
-  metric String   // "VIX" | "SP500" | "Nasdaq" | "Russell2000"
+  metric String // "VIX" | "SP500" | "Nasdaq" | "Russell2000"
   value  Float
   source String   @default("Yahoo Finance")
 
@@ -877,11 +877,11 @@ model MarketSnapshot {
 
 model GeoEvent {
   id              Int      @id @default(autoincrement())
-  region          String   // "China/Taiwan" | "Middle East" | "Russia/Ukraine"
+  region          String // "China/Taiwan" | "Middle East" | "Russia/Ukraine"
   eventTitle      String
-  severity        String   // "low" | "medium" | "high" | "critical"
+  severity        String // "low" | "medium" | "high" | "critical"
   affectedSectors String   @default("[]") // JSON: string[]
-  source          String   // news publisher (e.g. "Reuters")
+  source          String // news publisher (e.g. "Reuters")
   sourceUrl       String?
   eventDate       DateTime
 
@@ -899,7 +899,7 @@ model GeoEvent {
 model CashFlow {
   id        String   @id @default(cuid())
   date      DateTime
-  type      String   // "deposit" | "withdrawal"
+  type      String // "deposit" | "withdrawal"
   amountUsd Float
   note      String?
   source    String   @default("manual") // "manual" | "import"
@@ -914,17 +914,17 @@ model CashFlow {
 // snapshotDate is unique — one snapshot per calendar day.
 
 model PortfolioSnapshot {
-  id               String   @id @default(cuid())
-  snapshotDate     DateTime @unique
+  id                String   @id @default(cuid())
+  snapshotDate      DateTime @unique
   portfolioValueUsd Float
-  cashValueUsd     Float    @default(0)
-  investedValueUsd Float    @default(0)
-  netDepositsUsd   Float
+  cashValueUsd      Float    @default(0)
+  investedValueUsd  Float    @default(0)
+  netDepositsUsd    Float
   unrealizedGainUsd Float
-  totalReturnPct   Float    // simple: gain / netDeposits × 100
-  twrFactor        Float    @default(1.0) // sub-period return factor for TWR chain
-  source           String   @default("manual") // "manual" | "auto" | "import"
-  createdAt        DateTime @default(now())
+  totalReturnPct    Float // simple: gain / netDeposits × 100
+  twrFactor         Float    @default(1.0) // sub-period return factor for TWR chain
+  source            String   @default("manual") // "manual" | "auto" | "import"
+  createdAt         DateTime @default(now())
 
   @@index([snapshotDate])
   @@map("portfolio_snapshots")

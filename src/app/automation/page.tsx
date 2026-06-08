@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 const JOB_LABELS: Record<string, string> = {
   backup: "Backup",
   integrity_check: "Integrity Check",
+  macro_ingestion: "Macro Intelligence Ingestion",
   sec_filing_refresh: "SEC Filing Refresh",
   earnings_refresh: "Earnings Refresh",
   fmp_refresh: "FMP Fundamentals Refresh",
@@ -12,6 +13,10 @@ const JOB_LABELS: Record<string, string> = {
   dossier_refresh: "Dossier Refresh",
   portfolio_review_refresh: "Portfolio Review Refresh",
   brain_os_export: "Brain OS Export",
+  morning_brief: "Morning Brief",
+  radar_refresh: "Discovery Radar",
+  portfolio_architect: "Portfolio Architect",
+  email_delivery: "Email Delivery",
 };
 
 const JOB_NAMES = Object.keys(JOB_LABELS);
@@ -71,6 +76,7 @@ export default function AutomationPage() {
   const [loading, setLoading] = useState(true);
   const [runningNightly, setRunningNightly] = useState(false);
   const [runningJob, setRunningJob] = useState<string | null>(null);
+  const [sendingTestEmail, setSendingTestEmail] = useState(false);
   const [msg, setMsg] = useState("");
   const [activeTab, setActiveTab] = useState<"overview" | "history" | "jobs">("overview");
 
@@ -132,6 +138,27 @@ export default function AutomationPage() {
     }
   }
 
+  async function sendTestEmail() {
+    setSendingTestEmail(true);
+    setMsg("Sending test CIO Brief email…");
+    try {
+      const res = await fetch("/api/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "test" }),
+      });
+      const result = await res.json();
+      if (res.ok && result.success) {
+        setMsg(result.message ?? "Test email sent successfully.");
+      } else {
+        setMsg(`Error: ${result.error ?? "Email send failed"}`);
+      }
+      await load();
+    } finally {
+      setSendingTestEmail(false);
+    }
+  }
+
   async function retryJob(jobName: string) {
     setRunningJob(jobName);
     setMsg(`Retrying ${JOB_LABELS[jobName] ?? jobName}…`);
@@ -163,7 +190,7 @@ export default function AutomationPage() {
     if (!lastByJob[j.jobName]) lastByJob[j.jobName] = j;
   }
 
-  const isAnyRunning = runningNightly || !!runningJob;
+  const isAnyRunning = runningNightly || !!runningJob || sendingTestEmail;
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
@@ -175,13 +202,22 @@ export default function AutomationPage() {
             Self-maintaining investment OS — nightly sequence keeps all data fresh
           </p>
         </div>
-        <button
-          onClick={triggerNightly}
-          disabled={isAnyRunning}
-          className="px-4 py-2 text-sm bg-[#171A20] text-white rounded hover:bg-[#2a2d35] disabled:opacity-50"
-        >
-          {runningNightly ? "Running…" : "Run Nightly Sequence"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={sendTestEmail}
+            disabled={isAnyRunning}
+            className="px-4 py-2 text-sm border border-[#EEEEEE] text-[#5C5E62] rounded hover:bg-[#F4F4F4] disabled:opacity-50"
+          >
+            {sendingTestEmail ? "Sending…" : "Send Test CIO Brief"}
+          </button>
+          <button
+            onClick={triggerNightly}
+            disabled={isAnyRunning}
+            className="px-4 py-2 text-sm bg-[#171A20] text-white rounded hover:bg-[#2a2d35] disabled:opacity-50"
+          >
+            {runningNightly ? "Running…" : "Run Nightly Sequence"}
+          </button>
+        </div>
       </div>
 
       {/* Message bar */}

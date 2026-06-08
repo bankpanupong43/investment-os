@@ -1,11 +1,12 @@
 import { PrismaClient } from "@prisma/client";
 import fs from "fs";
 import path from "path";
+import { resolveBrainOsPath } from "../src/lib/shared-paths";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const BRAIN_OS_ROOT = "G:\\คอมพิวเตอร์เครื่องอื่นๆ\\คอมพิวเตอร์ของฉัน\\Shared\\Brain OS";
-const EXPORT_BASE = path.join(BRAIN_OS_ROOT, "07 Investment", "Investment OS");
+let BRAIN_OS_ROOT: string;
+let EXPORT_BASE: string;
 
 const db = new PrismaClient({ log: ["error"] });
 
@@ -631,6 +632,14 @@ ${journalLinks || "_No journal entries._"}
 // ─── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
+  const resolved = resolveBrainOsPath();
+  if (!resolved) {
+    console.error("ERROR: Brain OS folder not found. Set SHARED_ROOT env var or ensure the shared folder is accessible.");
+    process.exit(1);
+  }
+  BRAIN_OS_ROOT = resolved;
+  EXPORT_BASE = path.join(BRAIN_OS_ROOT, "07 Investment", "Investment OS");
+
   console.log("Exporting Investment OS → Brain OS...\n");
   console.log(`Target: ${EXPORT_BASE}\n`);
 

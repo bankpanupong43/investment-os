@@ -65,13 +65,16 @@ export const JOB_NAMES = [
   "opportunity_refresh",
   "dossier_refresh",
   "portfolio_review_refresh",
-  "brain_os_export",
   "morning_brief",
+  "brain_os_export",
   "radar_refresh",
   "portfolio_architect",
 ] as const;
 
 export type JobName = typeof JOB_NAMES[number];
+
+// email_delivery is not in JOB_NAMES (not a scheduled job) but records appear in job history
+export const EMAIL_JOB_LABEL = "Email Delivery";
 
 export const JOB_LABELS: Record<JobName, string> = {
   backup: "Backup",
@@ -282,6 +285,25 @@ async function runRadarRefresh(): Promise<JobResult> {
 async function runMorningBrief(): Promise<JobResult> {
   const data = await generateMorningBrief();
   const record = await saveMorningBrief(data);
+
+  // Build CIO brief document, archive to Brain OS/Morning Brief/, then email
+  try {
+    const { buildCIOBrief, renderCIOBriefMarkdown } = await import("./brief-generator");
+    const { renderHtmlEmail } = await import("./html-email-exporter");
+    const { archiveBrief } = await import("./brief-archive-service");
+    const doc = await buildCIOBrief(data);
+    const md = renderCIOBriefMarkdown(doc);
+    const html = renderHtmlEmail(doc);
+    archiveBrief(data.briefingDate, md, html);
+
+    // Send email — failure is recorded but does not fail morning_brief
+    const { sendBriefEmailWithTracking } = await import("./email-service");
+    const summary = doc.executiveSummary?.join(" ") ?? data.marketRegime;
+    await sendBriefEmailWithTracking(html, data.briefingDate, summary);
+  } catch (err) {
+    console.error("[morning_brief] CIO brief archive/email failed:", err);
+  }
+
   const actionCount = data.recommendedActions.length;
   const positivePct = data.portfolioImpact.positive.length;
   return {
