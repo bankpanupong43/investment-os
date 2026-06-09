@@ -89,8 +89,7 @@ if ($modified.Count -gt 0 -or $untracked.Count -gt 0 -or $staged.Count -gt 0) {
     Write-Host ''
     $answer = Read-Host 'Commit changes? [Y/N]'
     if ($answer -match '^[Yy]') {
-        $msg = Read-Host 'Commit message'
-        if (-not $msg.Trim()) { $msg = 'WIP checkpoint' }
+        $msg = 'checkpoint ' + (Get-Date -Format 'yyyy-MM-dd HH:mm')
 
         git add .
         if ($LASTEXITCODE -ne 0) { Abort 'git add failed.' }

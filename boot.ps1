@@ -64,7 +64,7 @@ if ($machine.sharedRoot -and (Test-Path $machine.sharedRoot)) {
 # ========================================================================
 # Step 1 - git pull
 # ========================================================================
-Write-Step 1 8 'Pulling latest code...'
+Write-Step 1 6 'Pulling latest code...'
 git pull origin main
 if ($LASTEXITCODE -ne 0) {
     Abort "git pull failed (exit $LASTEXITCODE).`n        Check your network or resolve merge conflicts, then retry."
@@ -74,7 +74,7 @@ Write-Host '[boot] Code up to date.' -ForegroundColor Green
 # ========================================================================
 # Step 2 - Sync shared data
 # ========================================================================
-Write-Step 2 8 'Syncing shared data...'
+Write-Step 2 6 'Syncing shared data...'
 & (Join-Path $machine.projectRoot 'sync-data.ps1')
 if ($LASTEXITCODE -ne 0) {
     Abort "sync-data.ps1 failed. Shared folder may not be accessible."
@@ -90,7 +90,7 @@ Write-Host '[boot] .env and dev.db verified.' -ForegroundColor Green
 # ========================================================================
 # Step 3 - Install dependencies if needed
 # ========================================================================
-Write-Step 3 8 'Checking Node dependencies...'
+Write-Step 3 6 'Checking Node dependencies...'
 
 $lockFile = Join-Path $machine.projectRoot 'package-lock.json'
 $hashFile = Join-Path $machine.projectRoot 'node_modules\.package-lock-hash'
@@ -115,7 +115,7 @@ if ($installNeeded) {
 # ========================================================================
 # Step 4 - Generate Prisma client
 # ========================================================================
-Write-Step 4 8 'Generating Prisma client...'
+Write-Step 4 6 'Generating Prisma client...'
 npx prisma generate
 if ($LASTEXITCODE -ne 0) { Abort 'prisma generate failed.' }
 Write-Host '[boot] Prisma client generated.' -ForegroundColor Green
@@ -123,7 +123,7 @@ Write-Host '[boot] Prisma client generated.' -ForegroundColor Green
 # ========================================================================
 # Step 5 - Sync database schema
 # ========================================================================
-Write-Step 5 8 'Verifying database schema...'
+Write-Step 5 6 'Verifying database schema...'
 $pushOut = npx prisma db push --skip-generate 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host '[boot] prisma db push output:' -ForegroundColor Yellow
@@ -140,55 +140,11 @@ if ($pushOut -join ' ' -match 'in sync') {
 # ========================================================================
 # Step 6 - Health check
 # ========================================================================
-Write-Step 6 8 'Running health check...'
+Write-Step 6 6 'Running health check...'
 & (Join-Path $machine.projectRoot 'health-check.ps1') -ProjectRoot $machine.projectRoot
 
-# ========================================================================
-# Step 7 - Start dev server
-# ========================================================================
-Write-Step 7 8 'Starting dev server...'
-
-# Warn if port 3000 is already occupied
-$portInUse = $null
-try { $portInUse = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction Stop | Select-Object -First 1 } catch { }
-if ($portInUse) {
-    Write-Host '[boot] WARNING: Port 3000 is already in use. Dev server may already be running.' -ForegroundColor Yellow
-    Write-Host '[boot] Skipping server start - opening browser directly.'
-} else {
-    $devArgs  = "-NoExit -NoProfile -Command `"Set-Location '$($machine.projectRoot)'; Write-Host 'Investment OS Dev Server' -ForegroundColor Cyan; npm run dev`""
-    $devProc  = Start-Process powershell -ArgumentList $devArgs -PassThru
-    Write-Host "[boot] Dev server started in new window (PID $($devProc.Id))." -ForegroundColor Green
-}
-
-# ========================================================================
-# Step 8 - Open browser
-# ========================================================================
-Write-Step 8 8 'Opening browser...'
-
-if (-not $portInUse) {
-    Write-Host '[boot] Waiting for Next.js to be ready...'
-    $ready = $false
-    for ($i = 1; $i -le 20; $i++) {
-        Start-Sleep -Seconds 2
-        try {
-            $null = Invoke-WebRequest -Uri 'http://localhost:3000' -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
-            $ready = $true
-            break
-        } catch { }
-        if ($i % 3 -eq 0) { Write-Host "[boot] Still waiting... ($($i * 2)s)" }
-    }
-    if ($ready) {
-        Write-Host '[boot] Server ready.' -ForegroundColor Green
-    } else {
-        Write-Host '[boot] Server taking longer than expected. Opening browser now.' -ForegroundColor Yellow
-    }
-}
-
-Start-Process 'http://localhost:3000'
-
-Write-Host ''
 Write-Host '=======================================' -ForegroundColor Green
-Write-Host '  Investment OS is running.'            -ForegroundColor Green
-Write-Host '  http://localhost:3000'               -ForegroundColor Green
+Write-Host '  Investment OS ready.'                 -ForegroundColor Green
+Write-Host '  Run: npm run dev'                     -ForegroundColor Green
 Write-Host '=======================================' -ForegroundColor Green
 Write-Host ''
