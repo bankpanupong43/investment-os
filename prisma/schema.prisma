@@ -547,9 +547,11 @@ model ResearchDossier {
   interpretation      String   @default("[]") // JSON: InterpretationItem[]
   recommendation      String   @default("{}") // JSON: RecommendationSection
   evidenceSummary     String   @default("{}") // JSON: EvidenceSummary
-  generatedAt         DateTime @default(now())
+  generatedAt              DateTime @default(now())
   // Phase 13A: on-demand research (not universe-backed)
-  isOnDemand          Boolean  @default(false)
+  isOnDemand               Boolean  @default(false)
+  // True when FMP premium endpoints returned 402 during generation
+  premiumDataUnavailable   Boolean  @default(false)
 
   @@index([opportunityScore])
   @@map("research_dossiers")

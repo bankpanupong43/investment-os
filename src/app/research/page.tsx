@@ -327,6 +327,14 @@ function DossierCard({
       {expanded && (
         <div className="border-t border-[#EEEEEE] p-5 space-y-6">
 
+          {/* Premium data unavailable notice */}
+          {d.premiumDataUnavailable && (
+            <div className="flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs" style={{ backgroundColor: "#FFFBEB", color: "#92400E", border: "1px solid #FDE68A" }}>
+              <span className="shrink-0 font-bold mt-px">!</span>
+              <span>Some premium metrics unavailable from current FMP plan. Dossier generated from company profile only.</span>
+            </div>
+          )}
+
           {/* Investment Summary */}
           <section>
             <h3 className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide mb-3">Investment Summary</h3>

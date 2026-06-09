@@ -21,15 +21,33 @@ function getSmtpConfig(): SmtpConfig {
   };
 }
 
+export function getSmtpMissingVars(): string[] {
+  const missing: string[] = [];
+  if (!process.env.SMTP_HOST) missing.push("SMTP_HOST");
+  if (!process.env.SMTP_USER) missing.push("SMTP_USER");
+  if (!process.env.SMTP_PASS) missing.push("SMTP_PASS");
+  if (!process.env.EMAIL_TO)  missing.push("EMAIL_TO");
+  return missing;
+}
+
 export function isSmtpConfigured(): boolean {
-  const c = getSmtpConfig();
-  return !!(c.host && c.user && c.pass && c.to);
+  return getSmtpMissingVars().length === 0;
+}
+
+export function logSmtpStatus(): void {
+  const missing = getSmtpMissingVars();
+  if (missing.length === 0) {
+    console.log("[SMTP] Configured");
+  } else {
+    console.warn(`[SMTP] Missing: ${missing.join(", ")}`);
+  }
 }
 
 // ─── Status ───────────────────────────────────────────────────────────────────
 
 export interface EmailStatus {
   configured: boolean;
+  missingVars: string[];
   host: string;
   user: string;
   to: string;
@@ -55,6 +73,7 @@ export async function getEmailStatus(): Promise<EmailStatus> {
 
   return {
     configured: isSmtpConfigured(),
+    missingVars: getSmtpMissingVars(),
     host: cfg.host,
     user: cfg.user,
     to: cfg.to,

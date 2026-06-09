@@ -30,6 +30,7 @@ interface IntegrityIssue {
 
 interface EmailStatus {
   configured: boolean;
+  missingVars: string[];
   host: string;
   user: string;
   to: string;
@@ -235,15 +236,32 @@ export default function SystemPage() {
               <div className="space-y-3">
                 <div className={`border rounded-lg p-4 ${emailStatus.configured ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}>
                   <div className="flex items-start justify-between flex-wrap gap-2">
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <div className={`font-medium text-sm ${emailStatus.configured ? "text-green-700" : "text-amber-700"}`}>
                         SMTP {emailStatus.configured ? "Configured" : "Not Configured"}
                       </div>
-                      {emailStatus.configured && (
+                      {emailStatus.configured ? (
                         <div className="text-xs text-[#5C5E62] mt-1 space-y-0.5">
                           <div><span className="text-[#8E8E8E]">Host: </span><span className="font-mono">{emailStatus.host}</span></div>
                           <div><span className="text-[#8E8E8E]">From: </span><span className="font-mono">{emailStatus.user}</span></div>
                           <div><span className="text-[#8E8E8E]">To: </span><span className="font-mono">{emailStatus.to}</span></div>
+                        </div>
+                      ) : (
+                        <div className="mt-1 space-y-0.5">
+                          {emailStatus.missingVars?.length > 0 && (
+                            <div className="text-xs text-amber-700">
+                              {emailStatus.missingVars.map(v => (
+                                <span key={v} className="inline-block mr-2 font-mono bg-amber-100 px-1 rounded">Missing {v}</span>
+                              ))}
+                            </div>
+                          )}
+                          {emailStatus.host && (
+                            <div className="text-xs text-[#5C5E62] mt-1 space-y-0.5">
+                              <div><span className="text-[#8E8E8E]">Host: </span><span className="font-mono">{emailStatus.host}</span></div>
+                              {emailStatus.user && <div><span className="text-[#8E8E8E]">From: </span><span className="font-mono">{emailStatus.user}</span></div>}
+                              {emailStatus.to && <div><span className="text-[#8E8E8E]">To: </span><span className="font-mono">{emailStatus.to}</span></div>}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

@@ -1,0 +1,17 @@
+{
+  "_doc": "Per-machine paths for boot.ps1 and shutdown.ps1. The script detects the current machine by checking which projectRoot exists. Set sharedRoot/brainOsRoot to null to auto-discover via shared-paths.ps1.",
+  "machines": [
+    {
+      "name": "Work PC",
+      "projectRoot": "D:\\Projects\\investment-os",
+      "sharedRoot": "D:\\Projects\\shared",
+      "brainOsRoot": "D:\\Projects\\shared\\Brain OS"
+    },
+    {
+      "name": "Home PC",
+      "projectRoot": "G:\\Projects\\investment-os",
+      "sharedRoot": null,
+      "brainOsRoot": null
+    }
+  ]
+}

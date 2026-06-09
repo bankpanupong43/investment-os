@@ -106,6 +106,8 @@ export interface ResearchDossierData {
   evidenceSummary: EvidenceSummary;
   // Phase 13A
   isOnDemand?: boolean;
+  // True when FMP premium endpoints returned 402 — dossier generated from profile only.
+  premiumDataUnavailable?: boolean;
 }
 
 // ─── Sector-specific content ───────────────────────────────────────────────────
@@ -823,6 +825,7 @@ export async function generateDossierOnDemand(ticker: string, apiKey: string): P
     recommendation,
     evidenceSummary,
     isOnDemand: true,
+    premiumDataUnavailable: fundamentalsRaw?.premiumDataUnavailable ?? false,
   };
 }
 
@@ -849,6 +852,7 @@ export async function saveDossier(data: ResearchDossierData): Promise<void> {
       suggestedAllocation: JSON.stringify(data.suggestedAllocation),
       generatedAt: new Date(),
       isOnDemand: data.isOnDemand ?? false,
+      premiumDataUnavailable: data.premiumDataUnavailable ?? false,
       ...evidenceFields,
     },
     create: {
@@ -864,6 +868,7 @@ export async function saveDossier(data: ResearchDossierData): Promise<void> {
       thesisDraft: JSON.stringify(data.thesisDraft),
       suggestedAllocation: JSON.stringify(data.suggestedAllocation),
       isOnDemand: data.isOnDemand ?? false,
+      premiumDataUnavailable: data.premiumDataUnavailable ?? false,
       ...evidenceFields,
     },
   });
@@ -892,7 +897,7 @@ export function parseDossierRow(row: {
   investmentSummary: string; businessOverview: string; whyBuy: string;
   risks: string; portfolioFit: string; thesisDraft: string; suggestedAllocation: string;
   facts?: string; interpretation?: string; recommendation?: string; evidenceSummary?: string;
-  generatedAt: Date; isOnDemand?: boolean;
+  generatedAt: Date; isOnDemand?: boolean; premiumDataUnavailable?: boolean;
 }): ResearchDossierData {
   return {
     ticker: row.ticker,
@@ -912,6 +917,7 @@ export function parseDossierRow(row: {
     recommendation: JSON.parse(row.recommendation ?? "{}"),
     evidenceSummary: JSON.parse(row.evidenceSummary ?? "{}"),
     isOnDemand: row.isOnDemand ?? false,
+    premiumDataUnavailable: row.premiumDataUnavailable ?? false,
   };
 }
 

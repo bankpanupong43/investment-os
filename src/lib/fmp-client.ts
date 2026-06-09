@@ -34,6 +34,9 @@ export interface FMPFundamentals {
   // should write null to DB rather than preserving the existing value.
   fieldsExplicitNull: FundamentalField[];
   apiCallCount:      number;
+  // True when one or more endpoints returned 402 (paid-plan required).
+  // Callers should continue with partial data rather than failing.
+  premiumDataUnavailable: boolean;
 }
 
 // ─── FMP stable response shapes ───────────────────────────────────────────────
@@ -82,13 +85,24 @@ export async function fetchFundamentals(ticker: string, apiKey: string): Promise
     revenueGrowth: null, epsGrowth: null, grossMargin: null, operatingMargin: null,
     freeCashFlow: null, debtToEquity: null, roic: null, sharesOutstanding: null,
     fieldsFound: [], fieldsMissing: [], fieldsExplicitNull: [], apiCallCount: 0,
+    premiumDataUnavailable: false,
   };
 
   const found = new Set<FundamentalField>();
   const explicitNulls = new Set<FundamentalField>();
+  let premiumBlocked = false;
+
+  function is402(err: unknown): boolean {
+    return err instanceof Error && err.message.includes("HTTP 402");
+  }
 
   // ── Call 1: Ratios TTM — margins + D/E ───────────────────────────────────
-  const ratiosArr = await stableGet<FMPRatiosTTM>("ratios-ttm", ticker, apiKey);
+  let ratiosArr: FMPRatiosTTM[] = [];
+  try {
+    ratiosArr = await stableGet<FMPRatiosTTM>("ratios-ttm", ticker, apiKey);
+  } catch (err) {
+    if (is402(err)) premiumBlocked = true;
+  }
   result.apiCallCount++;
   const ratios = ratiosArr[0] ?? null;
 
@@ -108,7 +122,12 @@ export async function fetchFundamentals(ticker: string, apiKey: string): Promise
   }
 
   // ── Call 2: Key Metrics TTM — ROIC + absolute FCF ────────────────────────
-  const kmArr = await stableGet<FMPKeyMetricsTTM>("key-metrics-ttm", ticker, apiKey);
+  let kmArr: FMPKeyMetricsTTM[] = [];
+  try {
+    kmArr = await stableGet<FMPKeyMetricsTTM>("key-metrics-ttm", ticker, apiKey);
+  } catch (err) {
+    if (is402(err)) premiumBlocked = true;
+  }
   result.apiCallCount++;
   const km = kmArr[0] ?? null;
 
@@ -127,7 +146,12 @@ export async function fetchFundamentals(ticker: string, apiKey: string): Promise
   }
 
   // ── Call 3: Income Statement (2 years) — growth + shares outstanding ─────
-  const incomeArr = await stableGet<FMPIncomeStatement>("income-statement", ticker, apiKey, "&limit=2");
+  let incomeArr: FMPIncomeStatement[] = [];
+  try {
+    incomeArr = await stableGet<FMPIncomeStatement>("income-statement", ticker, apiKey, "&limit=2");
+  } catch (err) {
+    if (is402(err)) premiumBlocked = true;
+  }
   result.apiCallCount++;
 
   if (incomeArr.length >= 1) {
@@ -162,6 +186,7 @@ export async function fetchFundamentals(ticker: string, apiKey: string): Promise
   result.fieldsFound = [...found] as FundamentalField[];
   result.fieldsMissing = ALL_FIELDS.filter(f => !found.has(f) && !explicitNulls.has(f)) as FundamentalField[];
   result.fieldsExplicitNull = [...explicitNulls] as FundamentalField[];
+  result.premiumDataUnavailable = premiumBlocked;
 
   return result;
 }
