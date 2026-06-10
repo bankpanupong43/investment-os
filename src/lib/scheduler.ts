@@ -276,6 +276,38 @@ async function runRadarRefresh(): Promise<JobResult> {
   const candidates = await generateRadarCandidates();
   const saved = await saveRadarCandidates(candidates);
   const topTicker = candidates[0]?.ticker ?? "—";
+
+  // Update Brain OS wiki themes + company pages from radar output
+  try {
+    const { upsertThemePage, upsertCompanyPage } = await import("./wiki-service");
+    // Aggregate candidates by theme
+    const themeMap = new Map<string, string[]>();
+    for (const c of candidates) {
+      for (const theme of (c.themes ?? [])) {
+        const existing = themeMap.get(theme) ?? [];
+        existing.push(c.ticker);
+        themeMap.set(theme, existing);
+      }
+    }
+    for (const [theme, tickers] of themeMap.entries()) {
+      upsertThemePage({
+        name: theme,
+        keyCompanies: tickers.map(t => ({ ticker: t, reason: candidates.find(c => c.ticker === t)?.discoveryReason ?? "" })),
+        source: "radar",
+      });
+    }
+    for (const c of candidates.slice(0, 10)) {
+      upsertCompanyPage({
+        ticker: c.ticker,
+        companyName: c.companyName ?? c.ticker,
+        summary: c.discoveryReason,
+        source: "radar",
+      });
+    }
+  } catch (err) {
+    console.error("[wiki] radar upsert failed:", err);
+  }
+
   return {
     success: true,
     summary: `Discovery Radar: ${saved.length} candidates. Top: ${topTicker} (${candidates[0]?.radarScore?.toFixed(0) ?? 0})`,
@@ -307,6 +339,33 @@ async function runMorningBrief(): Promise<JobResult> {
     await sendBriefEmailWithTracking(narrativeHtml, data.briefingDate, summary);
   } catch (err) {
     console.error("[morning_brief] CIO brief archive/email failed:", err);
+  }
+
+  // Update Brain OS wiki daily note + macro/geo pages from morning brief
+  try {
+    const { upsertDailyNote, appendMacroNote, appendGeopoliticsNote } = await import("./wiki-service");
+    const dateStr = data.briefingDate.toISOString().slice(0, 10);
+
+    const macroText = data.macroSummary.topics
+      .map((t: { topic: string; signal: string; insight: string }) => `**${t.topic}** (${t.signal}): ${t.insight}`)
+      .join("\n");
+    const geoText = data.geopoliticalSummary.risks
+      .map((r: { region: string; level: string; insight: string }) => `**${r.region}** (${r.level}): ${r.insight}`)
+      .join("\n");
+
+    appendMacroNote(macroText, dateStr);
+    appendGeopoliticsNote(geoText, dateStr);
+
+    upsertDailyNote({
+      date: dateStr,
+      regime: data.marketRegime,
+      keyEvents: data.marketRegimeEvidence ?? [],
+      macroUpdates: macroText,
+      geopoliticsUpdates: geoText,
+      actions: data.recommendedActions.map((a: { action: string }) => a.action),
+    });
+  } catch (err) {
+    console.error("[wiki] morning brief upsert failed:", err);
   }
 
   const actionCount = data.recommendedActions.length;

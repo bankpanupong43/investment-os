@@ -874,6 +874,26 @@ export async function saveDossier(data: ResearchDossierData): Promise<void> {
     },
   });
 
+  // Update Brain OS wiki with dossier data (append-only, never overwrites thesis)
+  try {
+    const { upsertCompanyPage } = await import("./wiki-service");
+    upsertCompanyPage({
+      ticker: data.ticker,
+      companyName: data.companyName,
+      summary: data.businessOverview?.description ?? "",
+      thesis: data.thesisDraft?.whyOwn ?? "",
+      bullCase: data.thesisDraft?.keyDrivers ?? [],
+      bearCase: data.risks?.businessRisks?.slice(0, 3).map((r: { risk: string }) => r.risk) ?? [],
+      metrics: {
+        "Objective Score": String(data.companyScore ?? ""),
+        "Opportunity Score": String(data.opportunityScore ?? ""),
+      },
+      source: "dossier",
+    });
+  } catch (err) {
+    console.error("[wiki] dossier upsert failed:", err);
+  }
+
   // Persist evidence facts to the normalized Evidence table for queryability
   if (data.facts && data.facts.length > 0) {
     await db.evidence.createMany({
