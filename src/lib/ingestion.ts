@@ -89,7 +89,7 @@ export async function ingestTicker(ticker: string, apiKey: string): Promise<Inge
 
       // Recompute and append a new score record
       const fund = await db.fundamental.findUnique({ where: { universeId: entry.id } });
-      const scores = computeScores(fund);
+      const scores = computeScores(fund ? { ...fund, sector: entry.sector } : null);
       await db.universeScore.create({
         data: {
           universeId:        entry.id,

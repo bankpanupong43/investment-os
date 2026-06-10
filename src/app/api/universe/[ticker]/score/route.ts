@@ -11,7 +11,7 @@ export async function POST(req: NextRequest, { params }: { params: { ticker: str
   });
   if (!entry) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const scores = computeScores(entry.fundamentals);
+  const scores = computeScores(entry.fundamentals ? { ...entry.fundamentals, sector: entry.sector } : null);
 
   const record = await db.universeScore.create({
     data: {

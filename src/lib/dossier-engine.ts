@@ -703,6 +703,7 @@ export async function generateDossierOnDemand(ticker: string, apiKey: string): P
     freeCashFlow: fundamentalsRaw.freeCashFlow,
     debtToEquity: fundamentalsRaw.debtToEquity,
     roic: fundamentalsRaw.roic,
+    sector: profile?.sector ?? null,
   } : null;
 
   const scores = computeScores(fundData);

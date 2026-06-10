@@ -181,7 +181,7 @@ async function runUniverseRescore(): Promise<JobResult> {
 
   for (const entry of entries) {
     if (!entry.fundamentals) { skipped++; continue; }
-    const scores = computeScores(entry.fundamentals);
+    const scores = computeScores(entry.fundamentals ? { ...entry.fundamentals, sector: entry.sector } : null);
     await db.universeScore.create({
       data: {
         universeId: entry.id,

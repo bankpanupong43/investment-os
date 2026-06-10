@@ -63,6 +63,18 @@ export interface InvestmentPhilosophyContext {
   decisionFramework: { priority: number; criterion: string }[];
 }
 
+export interface WorkoutContext {
+  loaded: boolean;
+  reportDate: string | null;
+  inBodyScore: number | null;
+  weight: number | null;
+  skeletalMuscleMass: number | null;
+  bodyFatPct: number | null;
+  bmr: number | null;
+  trend: string | null;
+  primaryGoal: string | null;
+}
+
 export interface BrainOSContext {
   loaded: boolean;
   loadedAt: string;
@@ -78,6 +90,8 @@ export interface BrainOSContext {
   portfolioConstructionRules: PortfolioConstructionRule[];
   historicalProposals: HistoricalAllocationProposal[];
   investmentPhilosophy: InvestmentPhilosophyContext | null;
+  // Phase 4.7 — workout / physical health context
+  workout: WorkoutContext;
 }
 
 // ─── Source file registry ─────────────────────────────────────────────────────
@@ -264,6 +278,107 @@ function parseInvestmentPhilosophy(content: string): InvestmentPhilosophyContext
   };
 }
 
+// ─── Workout / InBody context ─────────────────────────────────────────────────
+// Reads the latest bank*.md InBody report from 09 Workout/InBody Report/.
+// Extracts score, body composition metrics, and trend direction.
+
+function resolveLatestInBodyReport(root: string): string | null {
+  const dir = path.join(root, "09 Workout", "InBody Report");
+  try {
+    const files = fs.readdirSync(dir).filter(f => /^bank/i.test(f) && f.endsWith(".md"));
+    if (files.length === 0) return null;
+
+    // Filename format: bank{DD}.{MM}.{YYYY}.md — parse dates, pick latest
+    const dated = files.map(f => {
+      const m = f.match(/bank(\d{2})\.(\d{2})\.(\d{4})\.md/i);
+      if (!m) return { f, ts: 0 };
+      const ts = new Date(`${m[3]}-${m[2]}-${m[1]}`).getTime();
+      return { f, ts };
+    }).sort((a, b) => b.ts - a.ts);
+
+    return dated[0].ts > 0 ? path.join(dir, dated[0].f) : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseInBodyReport(content: string): Omit<WorkoutContext, "loaded" | "primaryGoal"> {
+  const num = (label: string): number | null => {
+    const m = content.match(new RegExp(`\\|\\s*${label}\\s*\\|\\s*([\\d.]+)`));
+    return m ? parseFloat(m[1]) : null;
+  };
+
+  const reportDateMatch = content.match(/\*\*Date:\*\*\s+(.+)/);
+  const reportDate = reportDateMatch ? reportDateMatch[1].trim() : null;
+
+  const scoreLine = content.match(/\*\*InBody Score:\*\*\s+([\d]+)/);
+  const inBodyScore = scoreLine ? parseInt(scoreLine[1]) : null;
+
+  const weight = num("Weight");
+  const skeletalMuscleMass = num("Skeletal Muscle Mass \\(SMM\\)");
+  const bodyFatMass = num("Body Fat Mass");
+  const bmrRaw = content.match(/\|\s*Basal Metabolic Rate \(BMR\)\s*\|\s*([\d,]+)/);
+  const bmr = bmrRaw ? parseInt(bmrRaw[1].replace(/,/g, "")) : null;
+
+  // Body fat % from Obesity Analysis table
+  const bfPctMatch = content.match(/\|\s*Body Fat Percentage \(PBF\)\s*\|\s*([\d.]+)%/);
+  const bodyFatPct = bfPctMatch ? parseFloat(bfPctMatch[1]) : null;
+
+  // Trend: look at last two rows of the trend table (heading may be # or ##)
+  // Match up to next top-level heading or standalone HR (\n---\n) to avoid table separator rows
+  const trendSection = content.match(/#{1,2} Body Composition Trend([\s\S]*?)(?=\n# |\n---\n|$)/);
+  let trend: string | null = null;
+  if (trendSection) {
+    const rows = trendSection[1].trim().split("\n").filter(l => /^\|/.test(l) && !/[-|:]+/.test(l.replace(/\|/g, "")));
+    const dataRows = rows.filter(r => /\d{4}/.test(r)); // rows with year
+    if (dataRows.length >= 2) {
+      const parsePct = (row: string) => { const m = row.match(/([\d.]+)%/); return m ? parseFloat(m[1]) : null; };
+      const parseSmm = (row: string) => { const cells = row.split("|").map(c => c.trim()).filter(Boolean); return cells[2] ? parseFloat(cells[2]) : null; };
+      const last = dataRows[dataRows.length - 1];
+      const prev = dataRows[dataRows.length - 2];
+      const smmDiff = (parseSmm(last) ?? 0) - (parseSmm(prev) ?? 0);
+      const bfDiff = (parsePct(last) ?? 0) - (parsePct(prev) ?? 0);
+      if (smmDiff > 0.2 && bfDiff <= 0) trend = "improving — muscle up, fat stable/down";
+      else if (smmDiff > 0.2) trend = "muscle increasing";
+      else if (bfDiff < -0.5) trend = "fat decreasing";
+      else if (smmDiff < -0.2) trend = "muscle declining";
+      else trend = "stable";
+    }
+  }
+
+  return { reportDate, inBodyScore, weight, skeletalMuscleMass, bodyFatPct, bmr, trend };
+}
+
+function loadWorkoutContext(root: string): WorkoutContext {
+  const empty: WorkoutContext = {
+    loaded: false, reportDate: null, inBodyScore: null, weight: null,
+    skeletalMuscleMass: null, bodyFatPct: null, bmr: null, trend: null, primaryGoal: null,
+  };
+
+  const reportPath = resolveLatestInBodyReport(root);
+  if (!reportPath) return empty;
+
+  try {
+    const content = fs.readFileSync(reportPath, "utf-8");
+    const parsed = parseInBodyReport(content);
+
+    // Primary goal from Workout.md program notes
+    let primaryGoal: string | null = null;
+    try {
+      const workoutMd = fs.readFileSync(path.join(root, "09 Workout", "Workout Program Project Notes.md"), "utf-8");
+      const goalMatch = workoutMd.match(/^Goals:\s*\n+([\s\S]*?)(?:\n\n|---)/m);
+      if (goalMatch) {
+        const lines = goalMatch[1].trim().split("\n").map(l => l.replace(/^[*\-]\s*/, "").trim()).filter(Boolean);
+        primaryGoal = lines.slice(0, 3).join("; ") || null;
+      }
+    } catch { /* ignore */ }
+
+    return { loaded: true, primaryGoal, ...parsed };
+  } catch {
+    return empty;
+  }
+}
+
 // ─── Fallback (Brain OS unavailable) ─────────────────────────────────────────
 
 const FALLBACK: BrainOSContext = {
@@ -293,6 +408,10 @@ const FALLBACK: BrainOSContext = {
   portfolioConstructionRules: [],
   historicalProposals: [],
   investmentPhilosophy: null,
+  workout: {
+    loaded: false, reportDate: null, inBodyScore: null, weight: null,
+    skeletalMuscleMass: null, bodyFatPct: null, bmr: null, trend: null, primaryGoal: null,
+  },
 };
 
 // ─── Main loader ──────────────────────────────────────────────────────────────
@@ -468,6 +587,25 @@ export function loadBrainContext(): BrainOSContext {
     }
   }
 
+  // ── Workout / physical health context ─────────────────────────────────────
+  const brainOsRoot = resolveBrainOsPath()!;
+  const workout = loadWorkoutContext(brainOsRoot);
+
+  if (workout.loaded && workout.inBodyScore !== null) {
+    const healthLine = [
+      workout.inBodyScore != null ? `InBody score ${workout.inBodyScore}/100` : null,
+      workout.weight != null ? `weight ${workout.weight}kg` : null,
+      workout.bodyFatPct != null ? `BF% ${workout.bodyFatPct}%` : null,
+      workout.trend ? `trend: ${workout.trend}` : null,
+    ].filter(Boolean).join(", ");
+    influences.push({
+      source: "09 Workout/InBody Report",
+      insight: `Bank is physically healthy (${healthLine}). High physical fitness confirms high-energy decision-making capacity. No health-driven reason to reduce risk tolerance.`,
+      appliesTo: ["biggestRisk", "riskAnalysis"],
+      excerpt: `InBody ${workout.inBodyScore}/100 as of ${workout.reportDate ?? "recent"}. Composition trend: ${workout.trend ?? "unknown"}.`,
+    });
+  }
+
   // ── Synthesized summary ────────────────────────────────────────────────────
   const principlesSummary = investmentPrinciples.length > 0
     ? ` Key principles: ${investmentPrinciples[0].principle}; ${investmentPrinciples[2]?.principle ?? "build a portfolio that can survive multiple futures"}.`
@@ -501,5 +639,6 @@ export function loadBrainContext(): BrainOSContext {
     portfolioConstructionRules,
     historicalProposals,
     investmentPhilosophy,
+    workout,
   };
 }
