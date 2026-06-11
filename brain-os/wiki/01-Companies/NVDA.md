@@ -28,11 +28,16 @@ NVIDIA is the infrastructure layer for the AI buildout. CUDA moat, data center p
 
 ## Key Metrics
 
+| Objective Score | 95.5 | 2026-06-11 |
+| Opportunity Score | 73.7 | 2026-06-11 |
+
 | Metric | Value | As Of |
 |--------|-------|-------|
 | Sector | Technology | 2026-06-10 |
 
 ## Recent Events
+
+**2026-06-11:** NVIDIA Corporation stands as a prominent provider of advanced graphics, computational, and networking solutions, operating across the United States, Taiwan, China, and numerous international markets. Its Graphics division encompasses GeForce GPUs, central to PC gaming and personal computing experiences, along with the GeForce NOW cloud gaming service and its supporting infrastructure, as well as dedicated solutions for various gaming platforms. For professional visualization, it provides Quadro and NVIDIA RTX GPUs for enterprise workstations, further offering vGPU software designed for cloud-c
 
 ## Decision History
 
