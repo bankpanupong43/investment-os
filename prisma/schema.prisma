@@ -717,9 +717,11 @@ model MorningBrief {
   geopoliticalSummary  String   @default("{}") // JSON: GeopoliticalSummary
   technologySummary    String   @default("{}") // JSON: TechnologySummary
   portfolioImpact      String   @default("{}") // JSON: PortfolioImpact
-  recommendedActions   String   @default("[]") // JSON: RecommendedAction[]
-  generatedFromSources String   @default("{}") // JSON: {positions: n, filings: n, committee: n, ...}
-  createdAt            DateTime @default(now())
+  recommendedActions    String   @default("[]") // JSON: RecommendedAction[]
+  generatedFromSources  String   @default("{}") // JSON: {positions: n, filings: n, committee: n, ...}
+  institutionalResearch String   @default("[]") // JSON: NewsletterInsight[]
+  newsletterConsensus   String   @default("[]") // JSON: NewsletterInsight[]
+  createdAt             DateTime @default(now())
 
   @@index([briefingDate])
   @@map("morning_briefs")
@@ -932,4 +934,30 @@ model PortfolioSnapshot {
 
   @@index([snapshotDate])
   @@map("portfolio_snapshots")
+}
+
+// ─── NewsletterItem ───────────────────────────────────────────────────────────
+// Ingested newsletter and institutional research content.
+// Deduplicated via rawContentHash = SHA256(title + source + publishedAt day).
+// Sources: Gmail (bloomberg_money_stuff, daily_upside, axios_markets, sherwood_news)
+//          Web RSS (blackrock, morgan_stanley, jpmorgan)
+
+model NewsletterItem {
+  id                       String   @id @default(cuid())
+  source                   String   // e.g. "bloomberg_money_stuff" | "blackrock"
+  title                    String
+  url                      String?
+  publishedAt              DateTime
+  summary                  String   @default("[]") // JSON: string[] 3-5 bullets
+  keyPoints                String   @default("[]") // JSON: string[] 5-10 bullets
+  marketImplications       String   @default("{}") // JSON: {equities,bonds,gold,oil,usd}: string
+  geopoliticalImplications String   @default("[]") // JSON: string[]
+  portfolioRelevance       String   @default("neutral") // "bullish" | "neutral" | "bearish"
+  confidence               Int      @default(50)   // 0-100
+  rawContentHash           String   @unique
+  createdAt                DateTime @default(now())
+
+  @@index([source])
+  @@index([publishedAt])
+  @@map("newsletter_items")
 }

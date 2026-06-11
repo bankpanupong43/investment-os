@@ -95,6 +95,15 @@ export interface RecommendedAction {
   ticker: string | null;
 }
 
+export interface NewsletterInsight {
+  source: string;
+  title: string;
+  summary: string[];
+  portfolioRelevance: "bullish" | "neutral" | "bearish";
+  publishedAt: string;
+  url?: string;
+}
+
 export interface MorningBriefData {
   briefingDate: Date;
   marketRegime: MarketRegime;
@@ -115,6 +124,7 @@ export interface MorningBriefData {
     macroDataPoints: number;
     marketDataPoints: number;
     geoEvents: number;
+    newsletterItems?: number;
   };
   dataSources: {
     macro: string[];
@@ -122,6 +132,8 @@ export interface MorningBriefData {
     geo: string[];
     portfolio: string[];
   };
+  institutionalResearch?: NewsletterInsight[];
+  newsletterConsensus?: NewsletterInsight[];
 }
 
 // ─── Sector / theme maps ──────────────────────────────────────────────────────
@@ -813,11 +825,13 @@ interface CommitteeRow {
 export async function generateMorningBrief(): Promise<MorningBriefData> {
   const since30d = new Date(Date.now() - 30 * 86400 * 1000);
 
+  const since7d = new Date(Date.now() - 7 * 86400 * 1000);
+
   // Load portfolio + meta counts in parallel with real-world data
   const [
     positions, committeeSessions,
     filingCount, impactCount, earningsCount, oppCount, thesisCount,
-    macroData, marketData, geoEvents,
+    macroData, marketData, geoEvents, recentNewsletters,
   ] = await Promise.all([
     db.position.findMany({
       where: { status: "active" },
@@ -836,6 +850,12 @@ export async function generateMorningBrief(): Promise<MorningBriefData> {
     getLatestMacroSnapshots(),
     getLatestMarketSnapshots(),
     getRecentGeoEvents(7),
+    // Phase 14: newsletter items from the last 7 days
+    db.newsletterItem.findMany({
+      where: { publishedAt: { gte: since7d } },
+      orderBy: { publishedAt: "desc" },
+      take: 30,
+    }).catch(() => [] as Awaited<ReturnType<typeof db.newsletterItem.findMany>>),
   ]);
 
   const latestCommittee = committeeSessions.reduce((acc, s) => {
@@ -875,6 +895,9 @@ export async function generateMorningBrief(): Promise<MorningBriefData> {
     "DB/ThesisImpacts", "DB/EarningsEvents", "DB/InvestmentTheses",
   ];
 
+  // Phase 14: build institutional research + newsletter consensus sections
+  const { institutional, newsletters } = buildNewsletterSections(recentNewsletters);
+
   return {
     briefingDate: today,
     marketRegime: regimeResult.regime,
@@ -895,6 +918,7 @@ export async function generateMorningBrief(): Promise<MorningBriefData> {
       macroDataPoints: Object.keys(macroData).length,
       marketDataPoints: Object.keys(marketData).length,
       geoEvents: geoEvents.length,
+      newsletterItems: recentNewsletters.length,
     },
     dataSources: {
       macro: macroSources,
@@ -902,41 +926,75 @@ export async function generateMorningBrief(): Promise<MorningBriefData> {
       geo: geoSources,
       portfolio: portfolioSources,
     },
+    institutionalResearch: institutional,
+    newsletterConsensus: newsletters,
+  };
+}
+
+// ─── Newsletter section builder ───────────────────────────────────────────────
+
+const INSTITUTIONAL_SOURCES = new Set(["blackrock", "morgan_stanley", "jpmorgan"]);
+const NEWSLETTER_SOURCES    = new Set(["bloomberg_money_stuff", "daily_upside", "axios_markets", "sherwood_news"]);
+
+const SOURCE_LABELS: Record<string, string> = {
+  bloomberg_money_stuff: "Bloomberg Money Stuff",
+  daily_upside:          "The Daily Upside",
+  axios_markets:         "Axios Markets",
+  sherwood_news:         "Sherwood News",
+  blackrock:             "BlackRock Investment Institute",
+  morgan_stanley:        "Morgan Stanley",
+  jpmorgan:              "J.P. Morgan",
+};
+
+function buildNewsletterSections(items: {
+  source: string; title: string; summary: string; portfolioRelevance: string;
+  publishedAt: Date; url: string | null;
+}[]): { institutional: NewsletterInsight[]; newsletters: NewsletterInsight[] } {
+  // Keep most recent entry per source
+  const bySource = new Map<string, typeof items[0]>();
+  for (const item of items) {
+    if (!bySource.has(item.source)) bySource.set(item.source, item);
+  }
+
+  const toInsight = (item: typeof items[0]): NewsletterInsight => ({
+    source:             SOURCE_LABELS[item.source] ?? item.source,
+    title:              item.title,
+    summary:            (() => { try { return JSON.parse(item.summary) as string[]; } catch { return [item.summary]; } })(),
+    portfolioRelevance: item.portfolioRelevance as "bullish" | "neutral" | "bearish",
+    publishedAt:        item.publishedAt.toISOString().slice(0, 10),
+    url:                item.url ?? undefined,
+  });
+
+  const deduped = [...bySource.values()];
+  return {
+    institutional: deduped.filter(i => INSTITUTIONAL_SOURCES.has(i.source)).map(toInsight),
+    newsletters:   deduped.filter(i => NEWSLETTER_SOURCES.has(i.source)).map(toInsight),
   };
 }
 
 // ─── Save to DB ───────────────────────────────────────────────────────────────
 
 export async function saveMorningBrief(data: MorningBriefData) {
+  const payload = {
+    marketRegime:         data.marketRegime,
+    marketRegimeEvidence: JSON.stringify(data.marketRegimeEvidence),
+    macroSummary:         JSON.stringify(data.macroSummary),
+    geopoliticalSummary:  JSON.stringify(data.geopoliticalSummary),
+    technologySummary:    JSON.stringify(data.technologySummary),
+    portfolioImpact:      JSON.stringify(data.portfolioImpact),
+    recommendedActions:   JSON.stringify(data.recommendedActions),
+    generatedFromSources: JSON.stringify({
+      ...data.generatedFromSources,
+      dataSources: data.dataSources,
+    }),
+    institutionalResearch: JSON.stringify(data.institutionalResearch ?? []),
+    newsletterConsensus:   JSON.stringify(data.newsletterConsensus ?? []),
+  };
+
   return db.morningBrief.upsert({
-    where: { briefingDate: data.briefingDate },
-    create: {
-      briefingDate: data.briefingDate,
-      marketRegime: data.marketRegime,
-      marketRegimeEvidence: JSON.stringify(data.marketRegimeEvidence),
-      macroSummary: JSON.stringify(data.macroSummary),
-      geopoliticalSummary: JSON.stringify(data.geopoliticalSummary),
-      technologySummary: JSON.stringify(data.technologySummary),
-      portfolioImpact: JSON.stringify(data.portfolioImpact),
-      recommendedActions: JSON.stringify(data.recommendedActions),
-      generatedFromSources: JSON.stringify({
-        ...data.generatedFromSources,
-        dataSources: data.dataSources,
-      }),
-    },
-    update: {
-      marketRegime: data.marketRegime,
-      marketRegimeEvidence: JSON.stringify(data.marketRegimeEvidence),
-      macroSummary: JSON.stringify(data.macroSummary),
-      geopoliticalSummary: JSON.stringify(data.geopoliticalSummary),
-      technologySummary: JSON.stringify(data.technologySummary),
-      portfolioImpact: JSON.stringify(data.portfolioImpact),
-      recommendedActions: JSON.stringify(data.recommendedActions),
-      generatedFromSources: JSON.stringify({
-        ...data.generatedFromSources,
-        dataSources: data.dataSources,
-      }),
-    },
+    where:  { briefingDate: data.briefingDate },
+    create: { briefingDate: data.briefingDate, ...payload },
+    update: payload,
   });
 }
 
@@ -953,6 +1011,8 @@ export function deserializeBrief(record: {
   portfolioImpact: string;
   recommendedActions: string;
   generatedFromSources: string;
+  institutionalResearch?: string;
+  newsletterConsensus?: string;
   createdAt: Date;
 }): MorningBriefData & { id: string; createdAt: Date } {
   const sources = JSON.parse(record.generatedFromSources);
@@ -970,5 +1030,11 @@ export function deserializeBrief(record: {
     recommendedActions: JSON.parse(record.recommendedActions),
     generatedFromSources: counts,
     dataSources: dataSources ?? { macro: [], market: [], geo: [], portfolio: [] },
+    institutionalResearch: record.institutionalResearch
+      ? (JSON.parse(record.institutionalResearch) as NewsletterInsight[])
+      : [],
+    newsletterConsensus: record.newsletterConsensus
+      ? (JSON.parse(record.newsletterConsensus) as NewsletterInsight[])
+      : [],
   };
 }

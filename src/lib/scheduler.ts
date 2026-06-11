@@ -13,6 +13,7 @@ import { generateMorningBrief, saveMorningBrief } from "./morning-brief-engine";
 import { generateRadarCandidates, saveRadarCandidates } from "./radar-engine";
 import { generateBlueprint, saveBlueprint } from "./architect-engine";
 import { runMacroIngestion } from "./macro-ingestion";
+import { runNewsletterRefresh } from "./newsletter-engine";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -65,6 +66,7 @@ export const JOB_NAMES = [
   "opportunity_refresh",
   "dossier_refresh",
   "portfolio_review_refresh",
+  "newsletter_refresh",
   "morning_brief",
   "brain_os_export",
   "radar_refresh",
@@ -87,6 +89,7 @@ export const JOB_LABELS: Record<JobName, string> = {
   opportunity_refresh: "Opportunity Refresh",
   dossier_refresh: "Dossier Refresh",
   portfolio_review_refresh: "Portfolio Review Refresh",
+  newsletter_refresh: "Newsletter Intelligence",
   brain_os_export: "Brain OS Export",
   morning_brief: "Morning Brief",
   radar_refresh: "Discovery Radar",
@@ -105,6 +108,7 @@ const JOB_RUNNERS: Record<JobName, () => Promise<JobResult>> = {
   opportunity_refresh: runOpportunityRefresh,
   dossier_refresh: runDossierRefresh,
   portfolio_review_refresh: runPortfolioReviewRefresh,
+  newsletter_refresh: runNewsletterRefresh_,
   brain_os_export: runBrainOsExport,
   morning_brief: runMorningBrief,
   radar_refresh: runRadarRefresh,
@@ -314,6 +318,15 @@ async function runRadarRefresh(): Promise<JobResult> {
   };
 }
 
+async function runNewsletterRefresh_(): Promise<JobResult> {
+  const result = await runNewsletterRefresh();
+  const sourceSummary = Object.entries(result.bySource)
+    .map(([src, n]) => `${src}:${n}`)
+    .join(", ");
+  const summary = `Newsletter: ${result.newItems} new items (${result.fetched} fetched, ${result.duplicatesSkipped} dupes).${sourceSummary ? ` Sources: ${sourceSummary}.` : ""}${result.errors.length > 0 ? ` Errors: ${result.errors.slice(0, 2).join("; ")}` : ""}`;
+  return { success: result.errors.length === 0 || result.newItems >= 0, summary };
+}
+
 async function runMorningBrief(): Promise<JobResult> {
   const data = await generateMorningBrief();
   const record = await saveMorningBrief(data);
@@ -355,6 +368,22 @@ async function runMorningBrief(): Promise<JobResult> {
 
     appendMacroNote(macroText, dateStr);
     appendGeopoliticsNote(geoText, dateStr);
+
+    // Append institutional research and newsletter consensus to macro wiki page
+    const institutionalItems: { source: string; title: string; summary: string[] }[] = data.institutionalResearch ?? [];
+    const newsletterItems: { source: string; title: string; summary: string[] }[]    = data.newsletterConsensus ?? [];
+
+    if (institutionalItems.length > 0) {
+      const institutionalText = "### Institutional Research\n" +
+        institutionalItems.map(i => `**${i.source}** — ${i.title}\n${(i.summary ?? []).slice(0, 2).join(" ")}`).join("\n\n");
+      appendMacroNote(institutionalText, dateStr);
+    }
+
+    if (newsletterItems.length > 0) {
+      const newsletterText = "### Newsletter Consensus\n" +
+        newsletterItems.map(i => `**${i.source}** — ${i.title}\n${(i.summary ?? []).slice(0, 2).join(" ")}`).join("\n\n");
+      appendMacroNote(newsletterText, dateStr);
+    }
 
     upsertDailyNote({
       date: dateStr,
