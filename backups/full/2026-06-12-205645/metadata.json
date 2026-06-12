@@ -1,0 +1,18 @@
+{
+  "label": "nightly",
+  "ts": "2026-06-12-205645",
+  "createdAt": "2026-06-12T13:56:46.439Z",
+  "database": {
+    "path": "backups/full/2026-06-12-205645/dev.db",
+    "size": 6840320,
+    "checksum": "450c53ee64d4fcfb7c92b38cb47bdb1a011e3b8d361f7fa3b79827647a84a5da"
+  },
+  "brainOs": {
+    "id": "cmqazpv8n0001228ibbhu3om3",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-06-12-205645",
+    "fileSize": 5947197,
+    "checksum": "fe5570d84f27e787ecb30e94609721e780e9d08c3601f5802adad77e3fe91fa9",
+    "createdAt": "2026-06-12T13:56:46.055Z"
+  }
+}

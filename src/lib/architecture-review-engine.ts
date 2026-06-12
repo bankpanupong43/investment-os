@@ -15,6 +15,15 @@ import fs from "fs";
 import path from "path";
 import { db } from "./db";
 import { resolveBrainOsPath } from "./shared-paths";
+import {
+  type HedgeEfficiencyResult,
+  type ReplacementScenario,
+  runFullHedgeEfficiencyAnalysis,
+} from "./hedge-efficiency-engine";
+import {
+  type RegimeHedgeReport,
+  generateRegimeHedgeReport,
+} from "./regime-hedge-engine";
 
 // ─── Ticker classification ────────────────────────────────────────────────────
 
@@ -348,7 +357,7 @@ export interface HedgeAuditResult {
 
   // Composite
   hedgeScore: number;
-  verdict: "INCREASE" | "KEEP" | "REDUCE" | "REMOVE";
+  verdict: "KEEP" | "REDUCE" | "REPLACE" | "REMOVE";
   reasoning: string;
 
   // Hedge stack inventory — Phase 16.2
@@ -378,6 +387,9 @@ export interface PortfolioArchitectureReviewData {
   architectureScore: ArchitectureScoreBreakdown;
   recommendations: ArchitectureRecommendation[];
   hedgeAudit: HedgeAuditResult | null;
+  hedgeRanking: HedgeEfficiencyResult[] | null;
+  replacementScenarios: ReplacementScenario[] | null;
+  regimeHedgeReport: RegimeHedgeReport | null;
   generatedFromSources: {
     positions: number;
     theses: number;
@@ -870,10 +882,10 @@ function buildHedgeReasoning(
   }
 
   const verdictText: Record<HedgeAuditResult["verdict"], string> = {
-    INCREASE: `At ${gldmPct.toFixed(1)}%, evidence supports expanding to 5–8% — hedge is working and cost is justified.`,
-    KEEP:     `Current ${gldmPct.toFixed(1)}% allocation is justified — maintain unless portfolio regime shifts materially.`,
-    REDUCE:   `Consider trimming to ${Math.max(2, Math.round(gldmPct - 2))}–${Math.max(3, Math.round(gldmPct - 1))}% — hedge efficiency has declined relative to cost.`,
-    REMOVE:   `Evidence does not support the gold position — correlation and drawdown data indicate gold is not functioning as a hedge in recent conditions.`,
+    KEEP:    `Current ${gldmPct.toFixed(1)}% allocation is justified — hedge is working and cost is within acceptable range.`,
+    REDUCE:  `Consider trimming to ${Math.max(2, Math.round(gldmPct - 2))}–${Math.max(3, Math.round(gldmPct - 1))}% — hedge efficiency has declined relative to cost.`,
+    REPLACE: `Hedge score suggests ${gldmPct.toFixed(1)}% in gold is underperforming — consult hedge efficiency ranking for a better-ranked alternative.`,
+    REMOVE:  `Evidence does not support the gold position — correlation and drawdown data indicate gold is not functioning as a hedge in recent conditions.`,
   };
   parts.push(verdictText[verdict]);
 
@@ -1094,9 +1106,9 @@ async function buildHedgeAudit(positions: ArchPos[]): Promise<HedgeAuditResult |
 
   // ── Verdict ───────────────────────────────────────────────────────────────
   const verdict: HedgeAuditResult["verdict"] =
-    hedgeScore >= 70 ? "INCREASE" :
-    hedgeScore >= 50 ? "KEEP"     :
-    hedgeScore >= 35 ? "REDUCE"   : "REMOVE";
+    hedgeScore >= 75 ? "KEEP"    :
+    hedgeScore >= 50 ? "REDUCE"  :
+    hedgeScore >= 25 ? "REPLACE" : "REMOVE";
 
   const reasoning = buildHedgeReasoning(portfolioCorrelation, drawdownBenefitPct, returnDragPct, hedgeScore, gldmAllocationPct, verdict);
 
@@ -1471,6 +1483,161 @@ export function writeHedgeAuditToWiki(audit: HedgeAuditResult, reviewDate: Date)
   fs.appendFileSync(filePath, section, "utf8");
 }
 
+// ─── Regime Hedge Wiki writer — Phase 16.4 ───────────────────────────────────
+
+export function writeRegimeHedgeToWiki(report: RegimeHedgeReport, reviewDate: Date): void {
+  const BRAIN_OS_ROOT = process.env.BRAIN_OS_ROOT ?? resolveBrainOsPath() ?? path.join(process.cwd(), "brain-os");
+  const filePath = path.join(BRAIN_OS_ROOT, "07 Investment", "Wiki", "Portfolio", "Architecture-Review.md");
+  if (!fs.existsSync(filePath)) return;
+
+  const month = reviewDate.toISOString().slice(0, 7);
+  const r     = report;
+  const sign  = (v: number) => (v >= 0 ? "+" : "") + v.toFixed(1);
+
+  // Current regime
+  const regimeSection = [
+    `## Current Regime — ${month}`,
+    "",
+    `**Regime:** ${r.currentRegime.regime}  `,
+    `**Confidence:** ${r.currentRegime.confidence}%`,
+    "",
+    "**Supporting Evidence:**",
+    ...r.currentRegime.supportingEvidence.map(e => `- ${e}`),
+    ...(r.currentRegime.conflictingEvidence.length > 0 ? [
+      "",
+      "**Conflicting Evidence:**",
+      ...r.currentRegime.conflictingEvidence.map(e => `- ${e}`),
+    ] : []),
+    "",
+  ];
+
+  // Hedge alignment
+  const alignSection = [
+    "### Hedge Alignment",
+    "",
+    `**Score:** ${r.portfolioAlignment.alignmentScore}/100 — **${r.portfolioAlignment.status.replace("-", " ")}**  `,
+    `**Total hedge:** ${r.portfolioAlignment.totalHedgePct}% (optimal: ${r.portfolioAlignment.optimalHedgePct})`,
+    "",
+    "| Ticker | Allocation | Regime Score | Verdict |",
+    "|---|---|---|---|",
+    ...r.portfolioAlignment.hedgeBreakdown.map(h =>
+      `| ${h.ticker} | ${h.pct.toFixed(1)}% | ${h.regimeScore}/100 | ${h.verdict} |`,
+    ),
+    "",
+    `> ${r.portfolioAlignment.recommendation}`,
+    "",
+  ];
+
+  // Current regime rankings (top 6)
+  const top6 = r.currentRegimeRanking.rankings.slice(0, 6);
+  const rankSection = [
+    `### Hedge Rankings for ${r.currentRegime.regime}`,
+    "",
+    "| Rank | Ticker | Score | Verdict |",
+    "|---|---|---|---|",
+    ...top6.map((h, i) => `| ${i + 1} | ${h.ticker} | ${h.score}/100 | ${h.verdict} |`),
+    "",
+  ];
+
+  // Scenario matrix
+  const scenarioRows = r.scenarioStressTests.flatMap(s => [
+    `| **${s.scenario}** | ${s.bestHedges.map(h => h.ticker).join(", ")} | ${s.worstHedges.map(h => h.ticker).join(", ")} | ${s.estimatedPortfolioImpact.slice(0, 80)} |`,
+  ]);
+
+  const scenarioSection = [
+    "### Scenario Matrix",
+    "",
+    "| Scenario | Best Hedges | Worst Hedges | Portfolio Impact |",
+    "|---|---|---|---|",
+    ...scenarioRows,
+    "",
+  ];
+
+  // Multi-regime verdict for GLDM (most relevant)
+  const gldmVerdict = r.multiVerdicts.find(v => v.ticker === "GLDM");
+  const verdictSection = gldmVerdict ? [
+    "### GLDM Multi-Regime Verdict",
+    "",
+    "| Regime | Score | Verdict | Current? |",
+    "|---|---|---|---|",
+    ...gldmVerdict.allVerdicts.map(v =>
+      `| ${v.regime} | ${v.score}/100 | ${v.verdict} | ${v.isCurrent ? "✓ Yes" : ""} |`,
+    ),
+    "",
+    `> **Summary:** ${gldmVerdict.summary}`,
+    "",
+  ] : [];
+
+  const section = [
+    "",
+    "---",
+    "",
+    ...regimeSection,
+    ...alignSection,
+    ...rankSection,
+    ...scenarioSection,
+    ...verdictSection,
+  ].join("\n");
+
+  fs.appendFileSync(filePath, section, "utf8");
+}
+
+// ─── Hedge Ranking Wiki writer — Phase 16.3 ──────────────────────────────────
+
+export function writeHedgeRankingToWiki(
+  rankings: HedgeEfficiencyResult[],
+  scenarios: ReplacementScenario[],
+  reviewDate: Date,
+): void {
+  const BRAIN_OS_ROOT = process.env.BRAIN_OS_ROOT ?? resolveBrainOsPath() ?? path.join(process.cwd(), "brain-os");
+  const filePath = path.join(BRAIN_OS_ROOT, "07 Investment", "Wiki", "Portfolio", "Architecture-Review.md");
+  if (!fs.existsSync(filePath)) return;
+
+  const month = reviewDate.toISOString().slice(0, 7);
+  const sign = (v: number) => (v >= 0 ? "+" : "") + v.toFixed(1);
+
+  const rankRows = rankings.map((r, i) =>
+    `| ${i + 1} | ${r.ticker} | ${r.category} | ${r.correlation90d.toFixed(3)} | ${sign(r.drawdownBenefit)}pp | ${sign(r.returnDrag)}pp | **${r.hedgeScore}** | ${r.verdict} |`,
+  );
+
+  const scenarioRows = scenarios.map(s =>
+    `| ${s.label} | ${s.allocationPct.toFixed(1)}% | ${sign(s.expectedReturnDelta)}pp | ${sign(s.expectedDrawdownDelta)}pp | ${sign(s.hedgeScoreDelta)} pts |`,
+  );
+
+  const winner = rankings[0];
+  const winnerReason = winner
+    ? `**${winner.ticker}** ranks #1 (score ${winner.hedgeScore}/100, ${winner.verdict}). ${winner.reasoning}`
+    : "No data available.";
+
+  const section = [
+    "",
+    "---",
+    "",
+    `## Hedge Efficiency Ranking — ${month}`,
+    "",
+    "### Rankings",
+    "",
+    "| Rank | Ticker | Category | Corr 90d | DD Benefit | Return Drag | Score | Verdict |",
+    "|---|---|---|---|---|---|---|---|",
+    ...rankRows,
+    "",
+    "### Replacement Scenarios",
+    "",
+    `Current gold position (${rankings.find(r => r.ticker === "GLDM")?.ticker ?? "GLDM"}) evaluated against alternatives:`,
+    "",
+    "| Scenario | Allocation | Return Δ | Drawdown Δ | Hedge Score Δ |",
+    "|---|---|---|---|---|",
+    ...scenarioRows,
+    "",
+    "### Current Hedge Winner",
+    "",
+    winnerReason,
+    "",
+  ].join("\n");
+
+  fs.appendFileSync(filePath, section, "utf8");
+}
+
 // ─── Main generator ───────────────────────────────────────────────────────────
 
 export async function generateArchitectureReview(): Promise<PortfolioArchitectureReviewData> {
@@ -1501,7 +1668,26 @@ export async function generateArchitectureReview(): Promise<PortfolioArchitectur
   const stressTests          = buildStressTests(positions, hedgeEffectiveness, blueprintScenarios);
   const architectureScore    = computeArchitectureScore(concentrationAnalysis, hedgeEffectiveness, stressTests);
   const recommendations      = buildRecommendations(architectureScore, concentrationAnalysis, hiddenCorrelations, hedgeEffectiveness, stressTests);
-  const hedgeAudit           = await buildHedgeAudit(positions);
+  const hedgeAudit = await buildHedgeAudit(positions);
+
+  // Phase 16.3 — Hedge efficiency ranking (best-effort; null if all data insufficient)
+  let hedgeRanking: HedgeEfficiencyResult[] | null = null;
+  let replacementScenarios: ReplacementScenario[] | null = null;
+  try {
+    const hedgeAnalysis = await runFullHedgeEfficiencyAnalysis(positions);
+    hedgeRanking         = hedgeAnalysis.rankings;
+    replacementScenarios = hedgeAnalysis.replacementScenarios;
+  } catch {
+    // Non-fatal — price fetch failure; ranking stays null
+  }
+
+  // Phase 16.4 — Regime-based hedge analysis (best-effort)
+  let regimeHedgeReport: RegimeHedgeReport | null = null;
+  try {
+    regimeHedgeReport = await generateRegimeHedgeReport(positions);
+  } catch {
+    // Non-fatal — DB or config failure; report stays null
+  }
 
   const today = new Date();
   today.setDate(1); // reviewDate is always the first of the current month
@@ -1518,6 +1704,9 @@ export async function generateArchitectureReview(): Promise<PortfolioArchitectur
     architectureScore,
     recommendations,
     hedgeAudit,
+    hedgeRanking,
+    replacementScenarios,
+    regimeHedgeReport,
     generatedFromSources: {
       positions: positions.filter(p => !p.isCash).length,
       theses: theses.length,
@@ -1555,6 +1744,11 @@ export async function saveArchitectureReview(data: PortfolioArchitectureReviewDa
     drawdownBenefit:   a?.drawdownBenefitPct    ?? null,
     returnDrag:        a?.returnDragPct         ?? null,
     hedgeAuditDetail:  a ? JSON.stringify(a)    : null,
+    // Hedge Efficiency Ranking — Phase 16.3
+    hedgeRankingDetail:      data.hedgeRanking         ? JSON.stringify(data.hedgeRanking)         : null,
+    replacementScenariosDetail: data.replacementScenarios ? JSON.stringify(data.replacementScenarios) : null,
+    // Regime Hedge Report — Phase 16.4
+    regimeHedgeReportDetail: data.regimeHedgeReport    ? JSON.stringify(data.regimeHedgeReport)    : null,
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1593,9 +1787,20 @@ export function deserializeArchitectureReview(record: {
   drawdownBenefit?:  number | null;
   returnDrag?:       number | null;
   hedgeAuditDetail?: string | null;
+  // Phase 16.3 hedge efficiency fields (nullable)
+  hedgeRankingDetail?:         string | null;
+  replacementScenariosDetail?: string | null;
+  // Phase 16.4 regime hedge report (nullable)
+  regimeHedgeReportDetail?:    string | null;
 }): PortfolioArchitectureReviewData & { id: string; createdAt: Date } {
   const hedgeAudit: HedgeAuditResult | null =
     record.hedgeAuditDetail ? (JSON.parse(record.hedgeAuditDetail) as HedgeAuditResult) : null;
+  const hedgeRanking: HedgeEfficiencyResult[] | null =
+    record.hedgeRankingDetail ? (JSON.parse(record.hedgeRankingDetail) as HedgeEfficiencyResult[]) : null;
+  const replacementScenarios: ReplacementScenario[] | null =
+    record.replacementScenariosDetail ? (JSON.parse(record.replacementScenariosDetail) as ReplacementScenario[]) : null;
+  const regimeHedgeReport: RegimeHedgeReport | null =
+    record.regimeHedgeReportDetail ? (JSON.parse(record.regimeHedgeReportDetail) as RegimeHedgeReport) : null;
 
   return {
     id: record.id,
@@ -1619,5 +1824,8 @@ export function deserializeArchitectureReview(record: {
     recommendations:       JSON.parse(record.recommendations),
     generatedFromSources:  JSON.parse(record.generatedFromSources),
     hedgeAudit,
+    hedgeRanking,
+    replacementScenarios,
+    regimeHedgeReport,
   };
 }

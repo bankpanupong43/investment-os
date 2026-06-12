@@ -497,9 +497,10 @@ function filterAndSort(entries: OpportunityEntry[], tab: TabId): OpportunityEntr
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-type PageTab = "recommended" | "agreement" | "disagreement" | "watchlist" | "screener";
+type PageTab = "recommended" | "committee" | "agreement" | "disagreement" | "watchlist" | "screener";
 const PAGE_TABS: { id: PageTab; label: string }[] = [
-  { id: "recommended",  label: "Recommended" },
+  { id: "recommended",  label: "Top Ranked" },
+  { id: "committee",    label: "Committee" },
   { id: "agreement",    label: "Agreement" },
   { id: "disagreement", label: "Disagreement" },
   { id: "watchlist",    label: "Watchlist" },
@@ -518,6 +519,8 @@ export default function OpportunitiesPage() {
   const [screenerError, setScreenerError] = useState<string | null>(null);
   const [screenerLoading, setScreenerLoading] = useState(false);
   const screenerFetchedRef = useRef(false);
+  const [committeeSessions, setCommitteeSessions] = useState<{ id: string; ticker: string; companyName: string; conviction: string; verdict: string; createdAt: string }[]>([]);
+  const committeeFetchedRef = useRef(false);
 
   useEffect(() => {
     fetch("/api/opportunities")
@@ -535,6 +538,23 @@ export default function OpportunitiesPage() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (pageTab !== "committee" || committeeFetchedRef.current) return;
+    committeeFetchedRef.current = true;
+    fetch("/api/committee")
+      .then(r => r.json())
+      .then(d => {
+        const seen = new Set<string>();
+        const latest = (d.sessions ?? []).filter((s: { ticker: string }) => {
+          if (seen.has(s.ticker)) return false;
+          seen.add(s.ticker);
+          return true;
+        });
+        setCommitteeSessions(latest);
+      })
+      .catch(() => {});
+  }, [pageTab]);
 
   useEffect(() => {
     if (pageTab !== "screener" || screenerFetchedRef.current) return;
@@ -813,6 +833,61 @@ export default function OpportunitiesPage() {
           )}
 
           {/* ── Screener ── */}
+          {pageTab === "committee" && (() => {
+            const convictionOrder = ["Strong Buy", "Buy", "Watch", "Hold", "Pass"];
+            const grouped = convictionOrder.reduce<Record<string, typeof committeeSessions>>((acc, c) => {
+              acc[c] = committeeSessions.filter(s => s.conviction === c);
+              return acc;
+            }, {});
+            const convStyle: Record<string, { bg: string; text: string }> = {
+              "Strong Buy": { bg: "#F0FDF4", text: "#15803D" },
+              "Buy":        { bg: "#EEF3FD", text: "#3E6AE1" },
+              "Watch":      { bg: "#FFFBEB", text: "#D97706" },
+              "Hold":       { bg: "#F4F4F4", text: "#5C5E62" },
+              "Pass":       { bg: "#FEF2F2", text: "#991B1B" },
+            };
+            return (
+              <div className="space-y-5">
+                {committeeSessions.length === 0 ? (
+                  <div className="py-12 text-center text-sm text-[#8E8E8E]">
+                    No committee sessions yet. Run a committee session from the Research page.
+                  </div>
+                ) : (
+                  convictionOrder.filter(c => grouped[c].length > 0).map(conviction => {
+                    const cs = convStyle[conviction] ?? convStyle["Hold"];
+                    return (
+                      <div key={conviction}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <span
+                            className="text-xs font-semibold px-2.5 py-1 rounded"
+                            style={{ backgroundColor: cs.bg, color: cs.text }}
+                          >
+                            {conviction}
+                          </span>
+                          <span className="text-xs text-[#AAAAAA]">{grouped[conviction].length} ticker{grouped[conviction].length !== 1 ? "s" : ""}</span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {grouped[conviction].map(s => (
+                            <div key={s.id} className="flex items-center gap-3 bg-white border border-[#EEEEEE] rounded-xl px-4 py-2.5">
+                              <span className="font-semibold text-sm text-[#171A20] w-14">{s.ticker}</span>
+                              <span className="flex-1 text-xs text-[#5C5E62] truncate">{s.companyName}</span>
+                              {s.verdict && s.verdict !== s.conviction && (
+                                <span className="text-xs text-[#8E8E8E]">{s.verdict}</span>
+                              )}
+                              <span className="text-[11px] text-[#AAAAAA]">
+                                {new Date(s.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            );
+          })()}
+
           {pageTab === "screener" && (
             <div>
               <p className="text-xs text-[#8E8E8E] mb-4">Universe ranked by company score. Use filters on the screener page for advanced filtering.</p>

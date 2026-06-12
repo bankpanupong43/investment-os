@@ -5,6 +5,8 @@ import {
   saveArchitectureReview,
   deserializeArchitectureReview,
   writeHedgeAuditToWiki,
+  writeHedgeRankingToWiki,
+  writeRegimeHedgeToWiki,
 } from "@/lib/architecture-review-engine";
 
 // GET — return most recent architecture review from DB
@@ -37,5 +39,11 @@ export async function POST(): Promise<NextResponse> {
   const data = await generateArchitectureReview();
   const record = await saveArchitectureReview(data);
   if (data.hedgeAudit) writeHedgeAuditToWiki(data.hedgeAudit, data.reviewDate);
+  if (data.hedgeRanking && data.replacementScenarios) {
+    writeHedgeRankingToWiki(data.hedgeRanking, data.replacementScenarios, data.reviewDate);
+  }
+  if (data.regimeHedgeReport) {
+    writeRegimeHedgeToWiki(data.regimeHedgeReport, data.reviewDate);
+  }
   return NextResponse.json(deserializeArchitectureReview(record), { status: 201 });
 }

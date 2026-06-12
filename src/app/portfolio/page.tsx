@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
-import type { AllocationEntry, UntrackedPosition } from "@/app/api/allocation/route";
+import type { BucketId, AllocationGap, AllocationRecommendation, BucketAllocation, ConcentrationMetric, BucketDriverSummary } from "@/lib/allocation-engine";
+import type { SimulatorResult, ComparisonRow, RegimeMatrixRow, SimulatorMove, SimulationResult } from "@/lib/allocation-simulator";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -19,12 +20,16 @@ function Skeleton({ className = "" }: { className?: string }) {
   return <div className={`bg-[#EEEEEE] rounded-xl animate-pulse ${className}`} />;
 }
 
-type TabId = "holdings" | "allocation" | "history" | "reviews";
+type TabId = "holdings" | "allocation" | "themes" | "simulator" | "architecture" | "hedge" | "decisions" | "history";
 const TABS: { id: TabId; label: string }[] = [
-  { id: "holdings",   label: "Holdings" },
-  { id: "allocation", label: "Allocation" },
-  { id: "history",    label: "History" },
-  { id: "reviews",    label: "Reviews" },
+  { id: "holdings",     label: "Holdings" },
+  { id: "allocation",   label: "Allocation" },
+  { id: "themes",       label: "Themes" },
+  { id: "simulator",    label: "Simulator" },
+  { id: "architecture", label: "Architecture" },
+  { id: "hedge",        label: "Hedge Audit" },
+  { id: "decisions",    label: "Decision Reviews" },
+  { id: "history",      label: "History" },
 ];
 
 // ─── Holdings tab ─────────────────────────────────────────────────────────────
@@ -132,49 +137,451 @@ function HoldingsTab() {
 
 // ─── Allocation tab ───────────────────────────────────────────────────────────
 
-// Mirrors the actual shape returned by GET /api/allocation
-interface AllocationResponse {
-  settings: {
-    label: string;
-    totalCapitalUsd: number;
-    totalCapitalThb: number;
-    exchangeRate: number;
-    source: string | null;
-  };
-  summary: {
-    totalTargetUsd: number;
-    totalDeployedUsd: number;
-    totalUntrackedUsd: number;
-    cashUsd: number;
-    totalGapUsd: number;
-    pctFunded: number;
-    canFullyFund: boolean;
-    shortfallUsd: number;
-    snapshotDate: string | null;
-  };
-  targets: AllocationEntry[];
-  untracked: UntrackedPosition[];
+interface AllocationReviewResponse {
+  generatedAt: string;
+  regime: string;
+  scenario: string;
+  buckets: BucketAllocation[];
+  allocationGrade: string;
+  allocationScore: number;
+  alignmentPct: number;
+  gapAnalysis: AllocationGap[];
+  concentration: ConcentrationMetric;
+  recommendations: AllocationRecommendation[];
+  largestUnderweight: AllocationGap | null;
+  largestOverweight: AllocationGap | null;
+  bucketDriverSummaries: BucketDriverSummary[];
+  topDriver: string;
 }
 
-const BUCKET_BAR: Record<string, string> = {
-  growth:    "#2d7d46",
-  core:      "#3E6AE1",
-  small:     "#b45309",
-  defensive: "#8E8E8E",
-  value:     "#6d28d9",
+const BUCKET_COLOR: Record<BucketId, string> = {
+  growth:     "#3E6AE1",
+  healthcare: "#15803D",
+  defense:    "#D97706",
+  gold:       "#B45309",
+  cash:       "#8E8E8E",
+  broad:      "#6D28D9",
+  other:      "#AAAAAA",
 };
 
-function AllocationTab() {
-  const [data, setData] = useState<AllocationResponse | null>(null);
+const GAP_GRADE_COLOR: Record<string, string> = {
+  A: "#15803D", B: "#3E6AE1", C: "#D97706", D: "#92400E", F: "#DC2626",
+};
+
+function GapBar({ gap }: { gap: AllocationGap }) {
+  const color = BUCKET_COLOR[gap.bucket] ?? "#8E8E8E";
+  const max = 80;
+  const currentW = Math.min(100, (gap.currentPct / max) * 100);
+  const targetW  = Math.min(100, (gap.targetPct  / max) * 100);
+  const isUnder  = gap.direction === "underweight";
+  const isOver   = gap.direction === "overweight";
+
+  return (
+    <div className="bg-white border border-[#EEEEEE] rounded-xl px-4 py-3">
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div>
+          <div className="text-sm font-semibold text-[#171A20]">{gap.label}</div>
+          <div className="flex gap-1 mt-0.5 flex-wrap">
+            {gap.tickers.map(t => (
+              <span key={t} className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ backgroundColor: color + "22", color }}>{t}</span>
+            ))}
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          {isUnder && <span className="text-xs font-bold" style={{ color: "#15803D" }}>+{gap.gapPct.toFixed(1)}% needed</span>}
+          {isOver  && <span className="text-xs font-bold" style={{ color: "#DC2626" }}>{gap.gapPct.toFixed(1)}% excess</span>}
+          {!isUnder && !isOver && <span className="text-xs text-[#15803D] font-medium">Balanced</span>}
+        </div>
+      </div>
+      {/* Dual bar: current (solid) vs target (dashed outline) */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-[#8E8E8E] w-12 shrink-0">Current</span>
+          <div className="flex-1 h-2 bg-[#EEEEEE] rounded-full overflow-hidden">
+            <div className="h-full rounded-full" style={{ width: `${currentW}%`, backgroundColor: color }} />
+          </div>
+          <span className="text-[10px] font-semibold text-[#5C5E62] w-8 text-right tabular-nums">{gap.currentPct.toFixed(0)}%</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-[#8E8E8E] w-12 shrink-0">Target</span>
+          <div className="flex-1 h-2 bg-[#EEEEEE] rounded-full overflow-hidden" style={{ border: "1px dashed #CCCCCC" }}>
+            <div className="h-full rounded-full opacity-50" style={{ width: `${targetW}%`, backgroundColor: color }} />
+          </div>
+          <span className="text-[10px] font-semibold text-[#5C5E62] w-8 text-right tabular-nums">{gap.targetPct.toFixed(0)}%</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const DRIVER_SOURCE_STYLE = {
+  REGIME:        { bg: "#EEF3FD", text: "#3E6AE1", label: "Regime" },
+  OPPORTUNITY:   { bg: "#F0FDF4", text: "#15803D", label: "Opportunity" },
+  HEDGE:         { bg: "#FFFBEB", text: "#D97706", label: "Hedge" },
+  CONCENTRATION: { bg: "#FEF2F2", text: "#DC2626", label: "Concentration" },
+};
+
+function BucketDriverCard({ driver }: { driver: BucketDriverSummary }) {
+  const rows = ([
+    { source: "REGIME" as const,        adj: driver.regimeAdjustment,        desc: driver.regimeDescription },
+    { source: "OPPORTUNITY" as const,   adj: driver.opportunityAdjustment,   desc: driver.opportunityDescription },
+    { source: "HEDGE" as const,         adj: driver.hedgeAdjustment,         desc: driver.hedgeDescription },
+    { source: "CONCENTRATION" as const, adj: driver.concentrationAdjustment, desc: driver.concentrationDescription },
+  ] as { source: keyof typeof DRIVER_SOURCE_STYLE; adj: number; desc: string }[]).filter(r => r.adj !== 0);
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="bg-white border border-[#EEEEEE] rounded-xl px-4 py-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm font-semibold text-[#171A20]">{driver.label}</span>
+        <span className="text-xs font-semibold text-[#171A20]">Final: {driver.finalAllocation.toFixed(0)}%</span>
+      </div>
+      {/* Base row */}
+      <div className="flex items-center justify-between py-1 border-t border-[#F4F4F4]">
+        <span className="text-xs text-[#8E8E8E]">Base (Neutral)</span>
+        <span className="text-xs font-medium text-[#5C5E62] tabular-nums">{driver.baseAllocation}%</span>
+      </div>
+      {/* Adjustment rows */}
+      {rows.map(row => {
+        const s = DRIVER_SOURCE_STYLE[row.source];
+        return (
+          <div key={row.source} className="flex items-center justify-between py-1 border-t border-[#F4F4F4]">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0"
+                style={{ backgroundColor: s.bg, color: s.text }}>
+                {s.label}
+              </span>
+              <span className="text-xs text-[#5C5E62] truncate">{row.desc}</span>
+            </div>
+            <span className="text-xs font-semibold tabular-nums ml-2 shrink-0"
+              style={{ color: row.adj > 0 ? "#15803D" : "#DC2626" }}>
+              {row.adj > 0 ? "+" : ""}{row.adj.toFixed(0)}%
+            </span>
+          </div>
+        );
+      })}
+      {/* Final row */}
+      <div className="flex items-center justify-between pt-2 mt-1 border-t-2 border-[#EEEEEE]">
+        <span className="text-xs font-semibold text-[#171A20]">Final Target</span>
+        <span className="text-xs font-bold text-[#3E6AE1] tabular-nums">{driver.finalAllocation.toFixed(0)}%</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Themes tab ───────────────────────────────────────────────────────────────
+
+interface ThemeGapItem {
+  themeId: string;
+  label: string;
+  currentPct: number;
+  targetPct: number;
+  gapPct: number;
+  direction: string;
+  tickers: string[];
+}
+
+interface ThemeDriverSummaryItem {
+  themeId: string;
+  label: string;
+  basePct: number;
+  regimeAdjustment: number;
+  regimeDescription: string;
+  opportunityAdjustment: number;
+  opportunityDescription: string;
+  newsletterAdjustment: number;
+  newsletterDescription: string;
+  momentumAdjustment: number;
+  momentumDescription: string;
+  finalAllocation: number;
+}
+
+interface ThemeRecommendationItem {
+  rank: number;
+  themeId: string;
+  label: string;
+  action: "ADD" | "REDUCE";
+  currentPct: number;
+  targetPct: number;
+  gapPct: number;
+  reason: string;
+  implementationTickers: string[];
+}
+
+interface ThemeAllocationData {
+  regime: string;
+  scenario: string;
+  gapAnalysis: ThemeGapItem[];
+  recommendations: ThemeRecommendationItem[];
+  themeDriverSummaries: ThemeDriverSummaryItem[];
+  largestThemeGap: { label: string; gapPct: number } | null;
+  largestThemeOverweight: { label: string; gapPct: number } | null;
+  topThemeDriver: string;
+}
+
+const THEME_SOURCE_STYLE = {
+  REGIME:      { bg: "#EEF3FD", text: "#3E6AE1",  label: "Regime" },
+  OPPORTUNITY: { bg: "#F0FDF4", text: "#15803D",  label: "Opportunity" },
+  NEWSLETTER:  { bg: "#FFF7ED", text: "#D97706",  label: "Newsletter" },
+  MOMENTUM:    { bg: "#F5F3FF", text: "#7C3AED",  label: "Momentum" },
+} as const;
+
+const THEME_COLORS: Record<string, string> = {
+  "ai-infrastructure": "#6366F1",
+  "semiconductors":    "#0EA5E9",
+  "healthcare":        "#10B981",
+  "defense":           "#3E6AE1",
+  "cybersecurity":     "#8B5CF6",
+  "consumer":          "#F59E0B",
+  "financials":        "#06B6D4",
+  "energy":            "#EF4444",
+  "cash":              "#22C55E",
+  "gold":              "#EAB308",
+  "broad":             "#6B7280",
+};
+
+function ThemeGapBar({ gap }: { gap: ThemeGapItem }) {
+  const color = THEME_COLORS[gap.themeId] ?? "#8E8E8E";
+  const maxPct = Math.max(gap.currentPct, gap.targetPct, 5);
+  const isUnder = gap.direction === "underweight";
+  const isOver  = gap.direction === "overweight";
+
+  return (
+    <div className="bg-white border border-[#EEEEEE] rounded-xl px-4 py-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm font-semibold text-[#171A20]">{gap.label}</span>
+        <span className="text-xs font-bold tabular-nums" style={{ color: isUnder ? "#15803D" : isOver ? "#DC2626" : "#8E8E8E" }}>
+          {gap.gapPct > 0 ? "+" : ""}{gap.gapPct.toFixed(1)}%
+        </span>
+      </div>
+      <div className="space-y-1.5">
+        {/* Current */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-[#AAAAAA] w-12 shrink-0">Current</span>
+          <div className="flex-1 h-2 bg-[#F4F4F4] rounded-full overflow-hidden">
+            <div className="h-full rounded-full" style={{ width: `${(gap.currentPct / maxPct) * 100}%`, backgroundColor: color, opacity: 0.5 }} />
+          </div>
+          <span className="text-[11px] font-semibold tabular-nums w-10 text-right text-[#5C5E62]">{gap.currentPct.toFixed(1)}%</span>
+        </div>
+        {/* Target */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-[#AAAAAA] w-12 shrink-0">Target</span>
+          <div className="flex-1 h-2 bg-[#F4F4F4] rounded-full overflow-hidden">
+            <div className="h-full rounded-full" style={{ width: `${(gap.targetPct / maxPct) * 100}%`, backgroundColor: color }} />
+          </div>
+          <span className="text-[11px] font-semibold tabular-nums w-10 text-right text-[#171A20]">{gap.targetPct.toFixed(1)}%</span>
+        </div>
+      </div>
+      {gap.tickers.length > 0 && (
+        <div className="flex gap-1 mt-2 flex-wrap">
+          {gap.tickers.slice(0, 5).map(t => (
+            <Link key={t} href={`/portfolio/${t}`}
+              className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#F4F4F4] text-[#5C5E62] hover:text-[#3E6AE1]">
+              {t}
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThemeDriverCard({ driver }: { driver: ThemeDriverSummaryItem }) {
+  const rows = ([
+    { source: "REGIME" as const,      adj: driver.regimeAdjustment,      desc: driver.regimeDescription },
+    { source: "OPPORTUNITY" as const, adj: driver.opportunityAdjustment, desc: driver.opportunityDescription },
+    { source: "NEWSLETTER" as const,  adj: driver.newsletterAdjustment,  desc: driver.newsletterDescription },
+    { source: "MOMENTUM" as const,    adj: driver.momentumAdjustment,    desc: driver.momentumDescription },
+  ] as { source: keyof typeof THEME_SOURCE_STYLE; adj: number; desc: string }[]).filter(r => r.adj !== 0);
+
+  if (rows.length === 0) return null;
+
+  const color = THEME_COLORS[driver.themeId] ?? "#8E8E8E";
+
+  return (
+    <div className="bg-white border border-[#EEEEEE] rounded-xl px-4 py-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+          <span className="text-sm font-semibold text-[#171A20]">{driver.label}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-[#AAAAAA]">base {driver.basePct}%</span>
+          <span className="text-xs font-bold text-[#3E6AE1] tabular-nums">→ {driver.finalAllocation.toFixed(1)}%</span>
+        </div>
+      </div>
+      {rows.map(row => {
+        const s = THEME_SOURCE_STYLE[row.source];
+        return (
+          <div key={row.source} className="flex items-center justify-between py-1 border-t border-[#F4F4F4]">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0"
+                style={{ backgroundColor: s.bg, color: s.text }}>
+                {s.label}
+              </span>
+              <span className="text-xs text-[#5C5E62] truncate">{row.desc}</span>
+            </div>
+            <span className="text-xs font-semibold tabular-nums ml-2 shrink-0"
+              style={{ color: row.adj > 0 ? "#15803D" : "#DC2626" }}>
+              {row.adj > 0 ? "+" : ""}{row.adj.toFixed(0)}%
+            </span>
+          </div>
+        );
+      })}
+      <div className="flex items-center justify-between pt-2 mt-1 border-t-2 border-[#EEEEEE]">
+        <span className="text-xs font-semibold text-[#171A20]">Final Target</span>
+        <span className="text-xs font-bold text-[#3E6AE1] tabular-nums">{driver.finalAllocation.toFixed(1)}%</span>
+      </div>
+    </div>
+  );
+}
+
+function ThemesTab() {
+  const [data, setData] = useState<ThemeAllocationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/allocation")
+    fetch("/api/theme-allocation")
       .then(async r => {
         const json = await r.json();
         if (!r.ok) throw new Error(json.error ?? `HTTP ${r.status}`);
-        return json as AllocationResponse;
+        return json as ThemeAllocationData;
+      })
+      .then(d => setData(d))
+      .catch(e => setError(e instanceof Error ? e.message : "Failed to load theme allocation"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div className="py-12 text-center text-sm text-[#8E8E8E]">Loading themes…</div>;
+  if (error)   return <div className="text-sm text-[#DC2626] py-4">{error}</div>;
+  if (!data)   return null;
+
+  const hasDrivers = (data.themeDriverSummaries ?? []).some(d =>
+    d.regimeAdjustment !== 0 || d.opportunityAdjustment !== 0 ||
+    d.newsletterAdjustment !== 0 || d.momentumAdjustment !== 0
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* Summary row */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        {[
+          { label: "Regime", value: data.regime },
+          { label: "Scenario", value: data.scenario },
+          { label: "Themes", value: `${data.gapAnalysis.length} active` },
+        ].map(m => (
+          <div key={m.label} className="bg-white border border-[#EEEEEE] rounded-xl p-3">
+            <div className="text-xs text-[#8E8E8E] mb-1">{m.label}</div>
+            <div className="text-lg font-semibold text-[#171A20]">{m.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Gap strips */}
+      {(data.largestThemeGap || data.largestThemeOverweight) && (
+        <div className="flex gap-3 flex-wrap">
+          {data.largestThemeGap && (
+            <div className="flex items-center gap-2 bg-[#F0FDF4] border border-[#86EFAC] rounded-xl px-3 py-2">
+              <span className="text-xs font-semibold text-[#15803D]">Largest Gap</span>
+              <span className="text-xs text-[#5C5E62]">{data.largestThemeGap.label}</span>
+              <span className="text-xs font-bold text-[#15803D]">+{data.largestThemeGap.gapPct.toFixed(1)}%</span>
+            </div>
+          )}
+          {data.largestThemeOverweight && (
+            <div className="flex items-center gap-2 bg-[#FEF2F2] border border-[#FCA5A5] rounded-xl px-3 py-2">
+              <span className="text-xs font-semibold text-[#DC2626]">Largest Excess</span>
+              <span className="text-xs text-[#5C5E62]">{data.largestThemeOverweight.label}</span>
+              <span className="text-xs font-bold text-[#DC2626]">{data.largestThemeOverweight.gapPct.toFixed(1)}%</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Theme gap bars */}
+      <div>
+        <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide mb-2">Theme Allocation</div>
+        <div className="space-y-2">
+          {data.gapAnalysis.map(gap => <ThemeGapBar key={gap.themeId} gap={gap} />)}
+        </div>
+      </div>
+
+      {/* Theme Drivers */}
+      {hasDrivers && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide">Theme Drivers</div>
+            <span className="text-[10px] text-[#AAAAAA]">targets normalized to 100%</span>
+          </div>
+          <div className="space-y-2">
+            {(data.themeDriverSummaries ?? []).map(d => (
+              <ThemeDriverCard key={d.themeId} driver={d} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Recommendations */}
+      {data.recommendations.length > 0 && (
+        <div>
+          <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide mb-2">Recommendations</div>
+          <div className="space-y-2">
+            {data.recommendations.map(rec => {
+              const isAdd = rec.action === "ADD";
+              return (
+                <div key={rec.themeId} className="bg-white border border-[#EEEEEE] rounded-xl px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded mt-0.5 shrink-0"
+                      style={{ backgroundColor: isAdd ? "#F0FDF4" : "#FFF7ED", color: isAdd ? "#15803D" : "#92400E" }}>
+                      {isAdd ? "INCREASE" : "REDUCE"}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-[#171A20]">
+                        {rec.label}
+                        <span className="ml-1.5 text-xs font-normal text-[#8E8E8E]">
+                          {rec.currentPct.toFixed(0)}% → {rec.targetPct.toFixed(0)}%
+                        </span>
+                      </div>
+                      <div className="text-xs text-[#5C5E62] mt-0.5">{rec.reason}</div>
+                      {rec.implementationTickers.length > 0 && (
+                        <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                          <span className="text-[10px] text-[#AAAAAA] mr-0.5">via:</span>
+                          {rec.implementationTickers.map(t => (
+                            <Link key={t} href={`/portfolio/${t}`}
+                              className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#EEF3FD] text-[#3E6AE1] hover:bg-[#DBEAFE]">
+                              {t}
+                            </Link>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-xs font-semibold tabular-nums shrink-0"
+                      style={{ color: isAdd ? "#15803D" : "#DC2626" }}>
+                      {rec.gapPct > 0 ? "+" : ""}{rec.gapPct.toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AllocationTab() {
+  const [data, setData] = useState<AllocationReviewResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/allocation-review")
+      .then(async r => {
+        const json = await r.json();
+        if (!r.ok) throw new Error(json.error ?? `HTTP ${r.status}`);
+        return json as AllocationReviewResponse;
       })
       .then(d => setData(d))
       .catch(e => setError(e instanceof Error ? e.message : "Failed to load allocation"))
@@ -185,56 +592,731 @@ function AllocationTab() {
   if (error) return <div className="text-sm text-[#DC2626] py-4">{error}</div>;
   if (!data) return null;
 
-  const targets = data.targets ?? [];
-  const { totalCapitalUsd } = data.settings;
-  const { totalDeployedUsd, totalGapUsd, pctFunded } = data.summary;
+  const gradeColor = GAP_GRADE_COLOR[data.allocationGrade] ?? "#8E8E8E";
 
   return (
     <div className="space-y-4">
-      {/* Summary */}
+      {/* Summary row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: "Total Capital", value: fmt(totalCapitalUsd) },
-          { label: "Deployed", value: fmt(totalDeployedUsd) },
-          { label: "Gap", value: fmt(totalGapUsd) },
-          { label: "% Funded", value: Math.round(pctFunded) + "%" },
+          { label: "Alignment", value: `${data.alignmentPct}%` },
+          { label: "Grade", value: data.allocationGrade, color: gradeColor },
+          { label: "Regime", value: data.regime },
+          { label: "Scenario", value: data.scenario },
         ].map(m => (
           <div key={m.label} className="bg-white border border-[#EEEEEE] rounded-xl p-3">
             <div className="text-xs text-[#8E8E8E] mb-1">{m.label}</div>
-            <div className="text-lg font-semibold text-[#171A20]">{m.value}</div>
+            <div className="text-lg font-semibold" style={{ color: m.color ?? "#171A20" }}>{m.value}</div>
           </div>
         ))}
       </div>
 
-      {/* Allocation targets */}
-      <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
-        {targets.map(e => {
-          const barColor = BUCKET_BAR[e.bucket] ?? "#8E8E8E";
-          const pct = Math.min(100, e.pctFunded);
-          const gapBadge = e.gapUsd > 0 ? `${fmt(e.gapUsd)} gap` : "Fully funded";
-          return (
-            <div key={e.ticker} className="flex items-center gap-4 px-4 py-3 border-b border-[#EEEEEE] last:border-0">
-              <div className="w-14 font-semibold text-[#171A20]">{e.ticker}</div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-[#5C5E62] truncate">{e.name}</span>
-                  <span className="text-xs text-[#8E8E8E] ml-2 shrink-0">{e.pctFunded.toFixed(0)}%</span>
+      {/* Gap summary strip */}
+      {(data.largestUnderweight || data.largestOverweight) && (
+        <div className="flex gap-3 flex-wrap">
+          {data.largestUnderweight && (
+            <div className="flex items-center gap-2 bg-[#F0FDF4] border border-[#86EFAC] rounded-xl px-3 py-2">
+              <span className="text-xs font-semibold text-[#15803D]">Largest Gap</span>
+              <span className="text-xs text-[#5C5E62]">{data.largestUnderweight.label}</span>
+              <span className="text-xs font-bold text-[#15803D]">+{data.largestUnderweight.gapPct.toFixed(1)}%</span>
+            </div>
+          )}
+          {data.largestOverweight && (
+            <div className="flex items-center gap-2 bg-[#FEF2F2] border border-[#FCA5A5] rounded-xl px-3 py-2">
+              <span className="text-xs font-semibold text-[#DC2626]">Largest Excess</span>
+              <span className="text-xs text-[#5C5E62]">{data.largestOverweight.label}</span>
+              <span className="text-xs font-bold text-[#DC2626]">{data.largestOverweight.gapPct.toFixed(1)}%</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Bucket bars */}
+      <div>
+        <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide mb-2">Bucket Allocation</div>
+        <div className="space-y-2">
+          {data.gapAnalysis.map(gap => <GapBar key={gap.bucket} gap={gap} />)}
+        </div>
+      </div>
+
+      {/* Allocation Drivers */}
+      {(data.bucketDriverSummaries ?? []).some(d =>
+        d.regimeAdjustment !== 0 || d.opportunityAdjustment !== 0 ||
+        d.hedgeAdjustment !== 0 || d.concentrationAdjustment !== 0
+      ) && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide">Allocation Drivers</div>
+            <span className="text-[10px] text-[#AAAAAA]">targets normalized to 100%</span>
+          </div>
+          <div className="space-y-2">
+            {(data.bucketDriverSummaries ?? []).map(d => (
+              <BucketDriverCard key={d.bucket} driver={d} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Recommendations */}
+      {data.recommendations.length > 0 && (
+        <div>
+          <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide mb-2">Recommendations</div>
+          <div className="space-y-2">
+            {data.recommendations.map(rec => {
+              const isAdd = rec.action === "ADD";
+              return (
+                <div key={rec.bucket} className="bg-white border border-[#EEEEEE] rounded-xl px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded mt-0.5 shrink-0"
+                      style={{ backgroundColor: isAdd ? "#F0FDF4" : "#FFF7ED", color: isAdd ? "#15803D" : "#92400E" }}>
+                      {rec.action}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-[#171A20]">
+                        {isAdd ? "Increase" : "Reduce"} {BUCKET_COLOR[rec.bucket] ? rec.bucket.charAt(0).toUpperCase() + rec.bucket.slice(1) : rec.bucket} Allocation
+                        <span className="ml-1.5 text-xs font-normal text-[#8E8E8E]">
+                          {rec.currentPct.toFixed(0)}% → {rec.targetPct.toFixed(0)}%
+                        </span>
+                      </div>
+                      <div className="text-xs text-[#5C5E62] mt-0.5">{rec.reason}</div>
+                      {rec.implementationTickers.length > 0 && (
+                        <div className="flex gap-1 mt-1.5 flex-wrap">
+                          <span className="text-[10px] text-[#AAAAAA] mr-0.5">via:</span>
+                          {rec.implementationTickers.map(t => (
+                            <Link key={t} href={`/portfolio/${t}`}
+                              className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#EEF3FD] text-[#3E6AE1] hover:bg-[#DBEAFE]">
+                              {t}
+                            </Link>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-xs font-semibold tabular-nums shrink-0"
+                      style={{ color: isAdd ? "#15803D" : "#DC2626" }}>
+                      {rec.gapPct.toFixed(1)}%
+                    </span>
+                  </div>
                 </div>
-                <div className="h-1.5 bg-[#EEEEEE] rounded-full overflow-hidden">
-                  <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: barColor }} />
-                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Concentration */}
+      <div>
+        <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide mb-2">Concentration Analysis</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {/* Key metrics */}
+          <div className="bg-white border border-[#EEEEEE] rounded-xl p-4 space-y-3">
+            {[
+              { label: "Top Position", value: `${data.concentration.topPosition.ticker} (${data.concentration.topPosition.pct.toFixed(1)}%)` },
+              { label: "Top 5 Concentration", value: `${data.concentration.top5Pct.toFixed(1)}%`, warn: data.concentration.top5Pct > 75 },
+              { label: "Mag7 Exposure", value: `${data.concentration.mag7Pct.toFixed(1)}%`, warn: data.concentration.mag7Pct > 35 },
+            ].map(m => (
+              <div key={m.label} className="flex items-center justify-between">
+                <span className="text-xs text-[#5C5E62]">{m.label}</span>
+                <span className="text-xs font-semibold" style={{ color: m.warn ? "#D97706" : "#171A20" }}>{m.value}</span>
               </div>
-              <div className="text-right shrink-0">
-                <div className="text-sm font-medium text-[#171A20]">{fmt(e.currentUsd)}</div>
-                <div className="text-[11px] text-[#8E8E8E]">{gapBadge}</div>
+            ))}
+          </div>
+          {/* Sector breakdown */}
+          <div className="bg-white border border-[#EEEEEE] rounded-xl p-4 space-y-2">
+            <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-wide mb-2">Sector Exposure</div>
+            {data.concentration.sectorBreakdown.slice(0, 5).map(s => (
+              <div key={s.sector} className="flex items-center gap-2">
+                <div className="flex-1 text-xs text-[#5C5E62] truncate">{s.sector}</div>
+                <div className="w-24 h-1.5 bg-[#EEEEEE] rounded-full overflow-hidden">
+                  <div className="h-full rounded-full bg-[#3E6AE1]" style={{ width: `${Math.min(100, s.pct * 2)}%` }} />
+                </div>
+                <div className="text-[10px] font-semibold text-[#5C5E62] w-8 text-right tabular-nums">{s.pct.toFixed(0)}%</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Simulator tab ────────────────────────────────────────────────────────────
+
+const METRIC_ICONS: Record<string, string> = {
+  "Expected Return":     "↑",
+  "Drawdown Protection": "⛶",
+  "Resilience":          "◈",
+  "Hedge Score":         "⬡",
+  "Concentration Risk":  "⊕",
+};
+
+function ScoreBadge({ value, higherBetter = true }: { value: number; higherBetter?: boolean }) {
+  const good = higherBetter ? value >= 70 : value <= 30;
+  const mid  = higherBetter ? value >= 45 : value <= 55;
+  const color = good ? "#15803D" : mid ? "#D97706" : "#DC2626";
+  const bg    = good ? "#F0FDF4" : mid ? "#FFFBEB" : "#FEF2F2";
+  return (
+    <span className="text-xs font-bold px-2 py-0.5 rounded tabular-nums" style={{ color, backgroundColor: bg }}>
+      {value}
+    </span>
+  );
+}
+
+function DeltaBadge({ delta, higherBetter = true }: { delta: number; higherBetter?: boolean }) {
+  if (Math.abs(delta) < 1) return <span className="text-xs text-[#8E8E8E] tabular-nums">—</span>;
+  const isGood = higherBetter ? delta > 0 : delta < 0;
+  const color  = isGood ? "#15803D" : "#DC2626";
+  const sign   = delta > 0 ? "+" : "";
+  return (
+    <span className="text-xs font-bold tabular-nums" style={{ color }}>
+      {sign}{Math.round(delta)}
+    </span>
+  );
+}
+
+function MetricCard({ metric, current, recommended, higherIsBetter }: ComparisonRow) {
+  const delta = recommended - current;
+  return (
+    <div className="bg-white border border-[#EEEEEE] rounded-xl p-3">
+      <div className="text-xs text-[#8E8E8E] mb-2">{metric}</div>
+      <div className="flex items-end justify-between gap-2">
+        <div>
+          <div className="text-[10px] text-[#AAAAAA] mb-0.5">Current</div>
+          <ScoreBadge value={current} higherBetter={higherIsBetter} />
+        </div>
+        <DeltaBadge delta={delta} higherBetter={higherIsBetter} />
+        <div className="text-right">
+          <div className="text-[10px] text-[#AAAAAA] mb-0.5">Target</div>
+          <ScoreBadge value={recommended} higherBetter={higherIsBetter} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SimulatorTab() {
+  const [data, setData]       = useState<SimulatorResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/allocation-simulator")
+      .then(r => r.json())
+      .then(d => { if (d.error) throw new Error(d.error); setData(d); })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return (
+    <div className="space-y-4">
+      {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20" />)}
+    </div>
+  );
+  if (error) return <div className="text-sm text-[#DC2626] py-4">{error}</div>;
+  if (!data)  return <div className="text-sm text-[#8E8E8E] py-4">No data.</div>;
+
+  const { current, recommended, comparison, regimeMatrix, regime, moves } = data;
+
+  return (
+    <div className="space-y-6">
+
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-[#171A20]">Allocation Simulator</h2>
+          <p className="text-xs text-[#8E8E8E] mt-0.5">
+            What happens if you follow the recommendations? · {regime} regime
+          </p>
+        </div>
+      </div>
+
+      {/* Metric cards — side by side */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        {comparison.map(row => (
+          <MetricCard key={row.metric} {...row} />
+        ))}
+      </div>
+
+      {/* Side-by-side comparison table */}
+      <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-[#EEEEEE]">
+          <span className="text-sm font-semibold text-[#171A20]">Scenario Comparison</span>
+        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-[#EEEEEE] text-xs text-[#8E8E8E]">
+              <th className="text-left px-4 py-2.5 font-medium">Metric</th>
+              <th className="text-right px-4 py-2.5 font-medium">Current</th>
+              <th className="text-right px-4 py-2.5 font-medium">Target</th>
+              <th className="text-right px-4 py-2.5 font-medium">Delta</th>
+            </tr>
+          </thead>
+          <tbody>
+            {comparison.map(row => (
+              <tr key={row.metric} className="border-b border-[#EEEEEE] last:border-0">
+                <td className="px-4 py-2.5">
+                  <span className="text-xs text-[#171A20]">{row.metric}</span>
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  <ScoreBadge value={row.current} higherBetter={row.higherIsBetter} />
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  <ScoreBadge value={row.recommended} higherBetter={row.higherIsBetter} />
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  <DeltaBadge delta={row.delta} higherBetter={row.higherIsBetter} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Regime matrix */}
+      <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-[#EEEEEE]">
+          <span className="text-sm font-semibold text-[#171A20]">Regime Matrix</span>
+          <span className="text-xs text-[#8E8E8E] ml-2">Portfolio score per scenario (0–100)</span>
+        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-[#EEEEEE] text-xs text-[#8E8E8E]">
+              <th className="text-left px-4 py-2.5 font-medium">Scenario</th>
+              <th className="text-right px-4 py-2.5 font-medium">Current</th>
+              <th className="text-right px-4 py-2.5 font-medium">Target</th>
+              <th className="text-right px-4 py-2.5 font-medium">Δ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {regimeMatrix.map(row => (
+              <tr key={row.regime} className="border-b border-[#EEEEEE] last:border-0">
+                <td className="px-4 py-2.5 text-xs text-[#171A20]">{row.regime}</td>
+                <td className="px-4 py-2.5 text-right">
+                  <span className="text-xs font-semibold tabular-nums text-[#5C5E62]">{row.current}</span>
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  <span className="text-xs font-semibold tabular-nums text-[#5C5E62]">{row.recommended}</span>
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  <DeltaBadge delta={row.delta} higherBetter={true} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Improvements / Degradations */}
+      {(recommended.improvements.length > 0 || recommended.degradations.length > 0) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {recommended.improvements.length > 0 && (
+            <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl px-4 py-3">
+              <div className="text-xs font-semibold text-[#15803D] mb-2">Improvements vs Current</div>
+              {recommended.improvements.map(s => (
+                <div key={s} className="text-xs text-[#15803D] py-0.5">{s}</div>
+              ))}
+            </div>
+          )}
+          {recommended.degradations.length > 0 && (
+            <div className="bg-[#FEF2F2] border border-[#FECACA] rounded-xl px-4 py-3">
+              <div className="text-xs font-semibold text-[#DC2626] mb-2">Trade-offs vs Current</div>
+              {recommended.degradations.map(s => (
+                <div key={s} className="text-xs text-[#DC2626] py-0.5">{s}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Recommended moves */}
+      {moves.length > 0 && (
+        <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-[#EEEEEE]">
+            <span className="text-sm font-semibold text-[#171A20]">Recommended Moves</span>
+            <span className="text-xs text-[#8E8E8E] ml-2">To reach target allocation</span>
+          </div>
+          <div className="divide-y divide-[#EEEEEE]">
+            {moves.map((move, i) => (
+              <div key={i} className="px-4 py-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span
+                    className="text-[10px] font-bold px-2 py-0.5 rounded shrink-0"
+                    style={{
+                      backgroundColor: move.action === "ADD" ? "#F0FDF4" : "#FEF2F2",
+                      color:           move.action === "ADD" ? "#15803D" : "#DC2626",
+                    }}
+                  >
+                    {move.action}
+                  </span>
+                  <span className="text-xs font-semibold text-[#171A20] capitalize">{move.label}</span>
+                  <div className="flex gap-1 flex-wrap min-w-0">
+                    {move.tickers.slice(0, 4).map(t => (
+                      <span key={t} className="text-[10px] text-[#3E6AE1] bg-[#EEF3FD] px-1.5 py-0.5 rounded font-medium">{t}</span>
+                    ))}
+                  </div>
+                </div>
+                <span className="text-xs font-bold tabular-nums shrink-0"
+                  style={{ color: move.action === "ADD" ? "#15803D" : "#DC2626" }}>
+                  {move.action === "ADD" ? "+" : "-"}{move.gapPct.toFixed(1)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+// ─── Architecture tab ─────────────────────────────────────────────────────────
+
+interface ArchitectureReviewSummary {
+  id: string;
+  reviewDate: string;
+  marketRegime: string;
+  architectureScore: { total: number; diversification: number; concentration: number; hedgeQuality: number; regimeResilience: number; grade: string; label: string };
+  recommendations: string[];
+  hedgeAudit?: { hedgeScore: number; verdict: string; hedgeStack: { gold: { tickers: string[]; allocationPct: number }; cash: { tickers: string[]; allocationPct: number }; defense: { tickers: string[]; allocationPct: number }; broadEtf: { tickers: string[]; allocationPct: number }; growthAssets: { tickers: string[]; allocationPct: number }; totalHedgePct: number } } | null;
+}
+
+function ScoreRow({ label, score, color }: { label: string; score: number; color: string }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs text-[#5C5E62]">{label}</span>
+        <span className="text-xs font-semibold" style={{ color }}>{score}</span>
+      </div>
+      <div className="h-1.5 bg-[#EEEEEE] rounded-full overflow-hidden">
+        <div className="h-full rounded-full transition-all" style={{ width: `${score}%`, backgroundColor: color }} />
+      </div>
+    </div>
+  );
+}
+
+function ArchitectureTab() {
+  const [review, setReview] = useState<ArchitectureReviewSummary | null>(null);
+  const [history, setHistory] = useState<{ reviewDate: string; architectureScore: number; scoreGrade: string; scoreLabel: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/portfolio-architecture")
+      .then(r => r.json())
+      .then(d => { setReview(d.review); setHistory(d.history ?? []); })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function runReview() {
+    setRunning(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/portfolio-architecture", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Review failed");
+      setReview(data);
+      setHistory(prev => [{ reviewDate: data.reviewDate, architectureScore: data.architectureScore.total, scoreGrade: data.architectureScore.grade, scoreLabel: data.architectureScore.label }, ...prev]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  if (loading) return <div className="py-12 text-center text-sm text-[#8E8E8E]">Loading architecture review…</div>;
+
+  const a = review?.architectureScore;
+  const gradeColor = a?.grade === "A" ? "#15803D" : a?.grade === "B" ? "#3E6AE1" : a?.grade === "C" ? "#D97706" : "#DC2626";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-[#5C5E62]">Portfolio architecture quality analysis.</p>
+        <button
+          onClick={runReview}
+          disabled={running}
+          className="text-sm font-medium px-4 py-2 rounded-lg text-white transition-opacity"
+          style={{ backgroundColor: "#3E6AE1", opacity: running ? 0.6 : 1 }}
+        >
+          {running ? "Analyzing…" : "Run Review"}
+        </button>
+      </div>
+      {error && <div className="text-sm text-[#DC2626] bg-[#FEF2F2] border border-[#FECACA] rounded-lg px-4 py-2">{error}</div>}
+
+      {review && a ? (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { label: "Architecture Score", value: a.total + "/100" },
+              { label: "Grade", value: a.grade },
+              { label: "Regime", value: review.marketRegime },
+              { label: "Review Date", value: new Date(review.reviewDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) },
+            ].map(m => (
+              <div key={m.label} className="bg-white border border-[#EEEEEE] rounded-xl p-3">
+                <div className="text-xs text-[#8E8E8E] mb-1">{m.label}</div>
+                <div className="text-lg font-semibold" style={{ color: m.label === "Grade" ? gradeColor : "#171A20" }}>{m.value}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-white border border-[#EEEEEE] rounded-xl p-4 space-y-3">
+            <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide">{a.label}</div>
+            <ScoreRow label="Architecture (overall)" score={a.total} color="#3E6AE1" />
+            <ScoreRow label="Diversification" score={a.diversification} color="#15803D" />
+            <ScoreRow label="Concentration" score={a.concentration} color="#D97706" />
+            <ScoreRow label="Hedge Quality" score={a.hedgeQuality} color="#9333EA" />
+            <ScoreRow label="Regime Resilience" score={a.regimeResilience} color="#F59E0B" />
+          </div>
+
+          {(review.recommendations ?? []).length > 0 && (
+            <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+              <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide mb-3">Recommendations</div>
+              <ul className="space-y-2">
+                {review.recommendations.map((r, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-[#5C5E62]">
+                    <span className="text-[#AAAAAA] mt-0.5">·</span>
+                    {r}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {history.length > 1 && (
+            <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
+              <div className="px-4 py-3 text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide border-b border-[#EEEEEE]">History</div>
+              {history.slice(0, 6).map(h => (
+                <div key={h.reviewDate} className="flex items-center justify-between px-4 py-2.5 border-b border-[#EEEEEE] last:border-0">
+                  <span className="text-sm text-[#5C5E62]">
+                    {new Date(h.reviewDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-[#171A20]">{h.architectureScore}/100</span>
+                    <span className="text-xs font-semibold px-1.5 py-0.5 rounded"
+                      style={{ color: h.scoreGrade === "A" ? "#15803D" : h.scoreGrade === "B" ? "#3E6AE1" : "#D97706",
+                               backgroundColor: h.scoreGrade === "A" ? "#F0FDF4" : h.scoreGrade === "B" ? "#EEF3FD" : "#FFFBEB" }}>
+                      {h.scoreGrade}
+                    </span>
+                    <span className="text-xs text-[#8E8E8E]">{h.scoreLabel}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="text-center py-12 text-sm text-[#8E8E8E]">
+          No architecture review yet. Click "Run Review" to generate one.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Hedge Audit tab ──────────────────────────────────────────────────────────
+
+const VERDICT_STYLE: Record<string, { bg: string; text: string }> = {
+  KEEP:    { bg: "#F0FDF4", text: "#15803D" },
+  REDUCE:  { bg: "#FFFBEB", text: "#92400E" },
+  REPLACE: { bg: "#FEF2F2", text: "#991B1B" },
+  REMOVE:  { bg: "#FEF2F2", text: "#991B1B" },
+};
+
+function HedgeAuditTab() {
+  const [review, setReview] = useState<ArchitectureReviewSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/portfolio-architecture")
+      .then(r => r.json())
+      .then(d => setReview(d.review))
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div className="py-12 text-center text-sm text-[#8E8E8E]">Loading hedge audit…</div>;
+  if (error) return <div className="text-sm text-[#DC2626] py-4">{error}</div>;
+
+  const audit = review?.hedgeAudit;
+
+  if (!audit) return (
+    <div className="text-center py-12 text-sm text-[#8E8E8E]">
+      No hedge audit data. Run an Architecture Review to generate one.
+    </div>
+  );
+
+  const stack = audit.hedgeStack;
+  const vs = VERDICT_STYLE[audit.verdict] ?? VERDICT_STYLE.KEEP;
+
+  const hedgeRows = [
+    { label: "Cash", tickers: stack.cash.tickers, pct: stack.cash.allocationPct },
+    { label: "Gold (GLDM/GLD)", tickers: stack.gold.tickers, pct: stack.gold.allocationPct },
+    { label: "Defense ETF (ITA)", tickers: stack.defense.tickers, pct: stack.defense.allocationPct },
+    { label: "Broad ETF", tickers: stack.broadEtf.tickers, pct: stack.broadEtf.allocationPct },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* Summary */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <div className="bg-white border border-[#EEEEEE] rounded-xl p-3">
+          <div className="text-xs text-[#8E8E8E] mb-1">Hedge Score</div>
+          <div className="text-lg font-semibold text-[#171A20]">{audit.hedgeScore}/100</div>
+        </div>
+        <div className="bg-white border border-[#EEEEEE] rounded-xl p-3">
+          <div className="text-xs text-[#8E8E8E] mb-1">Total Hedge %</div>
+          <div className="text-lg font-semibold text-[#171A20]">{stack.totalHedgePct.toFixed(1)}%</div>
+        </div>
+        <div className="bg-white border border-[#EEEEEE] rounded-xl p-3">
+          <div className="text-xs text-[#8E8E8E] mb-1">Verdict</div>
+          <span
+            className="text-sm font-semibold px-2.5 py-1 rounded"
+            style={{ backgroundColor: vs.bg, color: vs.text }}
+          >
+            {audit.verdict}
+          </span>
+        </div>
+      </div>
+
+      {/* Hedge Stack */}
+      <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
+        <div className="px-4 py-3 text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide border-b border-[#EEEEEE]">
+          Current Hedge Stack
+        </div>
+        {hedgeRows.map(row => (
+          <div key={row.label} className="flex items-center gap-4 px-4 py-3 border-b border-[#EEEEEE] last:border-0">
+            <div className="w-36 text-sm text-[#5C5E62]">{row.label}</div>
+            <div className="flex-1 flex items-center gap-3">
+              <div className="flex gap-1 flex-wrap">
+                {row.tickers.length > 0 ? row.tickers.map(t => (
+                  <span key={t} className="text-xs font-semibold px-1.5 py-0.5 rounded bg-[#EEF3FD] text-[#3E6AE1]">{t}</span>
+                )) : <span className="text-xs text-[#AAAAAA]">—</span>}
               </div>
             </div>
-          );
-        })}
-        {targets.length === 0 && (
-          <div className="px-4 py-8 text-center text-sm text-[#8E8E8E]">No allocation targets set.</div>
-        )}
+            <div className="text-sm font-semibold text-[#171A20] tabular-nums w-14 text-right">
+              {row.pct.toFixed(1)}%
+            </div>
+          </div>
+        ))}
+        <div className="flex items-center gap-4 px-4 py-3 bg-[#F4F4F4]">
+          <div className="w-36 text-sm font-semibold text-[#171A20]">Total Hedge</div>
+          <div className="flex-1" />
+          <div className="text-sm font-bold text-[#171A20] tabular-nums w-14 text-right">{stack.totalHedgePct.toFixed(1)}%</div>
+        </div>
       </div>
+
+      {/* Growth assets for context */}
+      {stack.growthAssets.tickers.length > 0 && (
+        <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+          <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide mb-2">Growth Assets</div>
+          <div className="flex items-center gap-3">
+            <div className="flex gap-1 flex-wrap">
+              {stack.growthAssets.tickers.map(t => (
+                <span key={t} className="text-xs font-semibold px-1.5 py-0.5 rounded bg-[#F0FDF4] text-[#15803D]">{t}</span>
+              ))}
+            </div>
+            <span className="text-sm font-semibold text-[#171A20]">{stack.growthAssets.allocationPct.toFixed(1)}%</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Decision Reviews tab ─────────────────────────────────────────────────────
+
+interface DecisionReview {
+  id: string;
+  ticker: string;
+  thesisStatus: string;
+  verdict: string;
+  confidence: number;
+  opportunityScore: number;
+  lessonLearned: string;
+  reviewDate: string;
+}
+
+const THESIS_VERDICT_STYLE: Record<string, { bg: string; text: string }> = {
+  "Strengthen": { bg: "#F0FDF4", text: "#15803D" },
+  "Hold":       { bg: "#EEF3FD", text: "#3E6AE1" },
+  "Monitor":    { bg: "#FFFBEB", text: "#D97706" },
+  "Reduce":     { bg: "#FEF9EC", text: "#92400E" },
+  "Exit":       { bg: "#FEF2F2", text: "#991B1B" },
+};
+
+const THESIS_STATUS_STYLE: Record<string, { color: string }> = {
+  "Confirmed":           { color: "#15803D" },
+  "Partially Confirmed": { color: "#D97706" },
+  "Broken":              { color: "#DC2626" },
+};
+
+function DecisionReviewsTab() {
+  const [reviews, setReviews] = useState<DecisionReview[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/decision-review")
+      .then(r => r.json())
+      .then(d => setReviews(d.reviews ?? []))
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div className="py-12 text-center text-sm text-[#8E8E8E]">Loading decision reviews…</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-[#5C5E62]">Latest decision review per position.</p>
+      </div>
+      {error && <div className="text-sm text-[#DC2626] bg-[#FEF2F2] border border-[#FECACA] rounded-lg px-4 py-2">{error}</div>}
+      {reviews.length === 0 ? (
+        <div className="text-center py-12 text-sm text-[#8E8E8E]">No decision reviews yet. Run from Automation.</div>
+      ) : (
+        <div className="space-y-2">
+          {reviews.map(r => {
+            const vs = THESIS_VERDICT_STYLE[r.verdict] ?? THESIS_VERDICT_STYLE["Hold"];
+            const ts = THESIS_STATUS_STYLE[r.thesisStatus] ?? { color: "#8E8E8E" };
+            return (
+              <div key={r.id} className="bg-white border border-[#EEEEEE] rounded-xl px-4 py-3">
+                <div className="flex items-center justify-between gap-3 mb-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-[#171A20]">{r.ticker}</span>
+                    <span
+                      className="text-xs font-medium"
+                      style={{ color: ts.color }}
+                    >
+                      {r.thesisStatus}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="text-[11px] font-semibold px-2.5 py-0.5 rounded"
+                      style={{ backgroundColor: vs.bg, color: vs.text }}
+                    >
+                      {r.verdict}
+                    </span>
+                    <span className="text-[11px] text-[#AAAAAA]">
+                      {new Date(r.reviewDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 text-xs text-[#8E8E8E]">
+                  <span>Confidence {r.confidence}/10</span>
+                  <span>Opp score {r.opportunityScore}</span>
+                </div>
+                {r.lessonLearned && (
+                  <div className="text-xs text-[#5C5E62] mt-1.5 border-l-2 border-[#EEEEEE] pl-2">{r.lessonLearned}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -960,7 +2042,7 @@ export default function PortfolioPage() {
     <div className="max-w-4xl mx-auto py-8 px-4 md:px-6 space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-[#171A20]">Portfolio</h1>
-        <p className="text-xs text-[#8E8E8E] mt-0.5">Holdings · allocation · performance · cash flows · reviews</p>
+        <p className="text-xs text-[#8E8E8E] mt-0.5">How healthy is my portfolio?</p>
       </div>
 
       {/* Tab bar */}
@@ -983,10 +2065,14 @@ export default function PortfolioPage() {
         </div>
 
         <div className="p-4">
-          {tab === "holdings"   && <HoldingsTab />}
-          {tab === "allocation" && <AllocationTab />}
-          {tab === "history"    && <HistoryTab />}
-          {tab === "reviews"    && <ReviewsTab />}
+          {tab === "holdings"     && <HoldingsTab />}
+          {tab === "allocation"   && <AllocationTab />}
+          {tab === "themes"       && <ThemesTab />}
+          {tab === "simulator"    && <SimulatorTab />}
+          {tab === "architecture" && <ArchitectureTab />}
+          {tab === "hedge"        && <HedgeAuditTab />}
+          {tab === "decisions"    && <DecisionReviewsTab />}
+          {tab === "history"      && <HistoryTab />}
         </div>
       </div>
     </div>

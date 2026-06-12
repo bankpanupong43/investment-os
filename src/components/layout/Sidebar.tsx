@@ -2,132 +2,96 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const NAV_GROUPS = [
+const PRIMARY_NAV = [
   {
-    label: "INVEST",
-    items: [
-      {
-        href: "/dashboard",
-        label: "Dashboard",
-        icon: (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" />
-            <rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
-          </svg>
-        ),
-      },
-      {
-        href: "/morning-brief",
-        label: "CIO Brief",
-        icon: (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <path d="M7 8h10M7 12h10M7 16h6" />
-          </svg>
-        ),
-      },
-      {
-        href: "/morning",
-        label: "Morning Intelligence",
-        icon: (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="4" />
-            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-          </svg>
-        ),
-      },
-      {
-        href: "/architect",
-        label: "Portfolio Architect",
-        icon: (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M2 20h20M6 20V10l6-6 6 6v10" />
-            <path d="M10 20v-5h4v5" />
-          </svg>
-        ),
-      },
-      {
-        href: "/discovery",
-        label: "Discovery Radar",
-        icon: (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="2" />
-            <circle cx="12" cy="12" r="6" />
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="2" x2="12" y2="4" />
-          </svg>
-        ),
-      },
-      {
-        href: "/portfolio",
-        label: "Portfolio",
-        icon: (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="2" y="7" width="20" height="14" rx="2" />
-            <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
-            <line x1="12" y1="12" x2="12" y2="16" /><line x1="10" y1="14" x2="14" y2="14" />
-          </svg>
-        ),
-      },
-      {
-        href: "/opportunities",
-        label: "Opportunities",
-        icon: (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-          </svg>
-        ),
-      },
-      {
-        href: "/committee",
-        label: "Committee",
-        icon: (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="8" r="4" />
-            <path d="M6 20v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
-            <line x1="2" y1="12" x2="6" y2="12" /><line x1="18" y1="12" x2="22" y2="12" />
-          </svg>
-        ),
-      },
-    ],
+    href: "/ask",
+    label: "Ask CIO",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      </svg>
+    ),
   },
   {
-    label: "RESEARCH",
-    items: [
-      {
-        href: "/research",
-        label: "Research",
-        icon: (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-            <line x1="11" y1="8" x2="11" y2="14" /><line x1="8" y1="11" x2="14" y2="11" />
-          </svg>
-        ),
-      },
-    ],
+    href: "/dashboard",
+    label: "Dashboard",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" />
+        <rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+      </svg>
+    ),
   },
   {
-    label: "SYSTEM",
-    items: [
-      {
-        href: "/automation",
-        label: "Automation",
-        icon: (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-          </svg>
-        ),
-      },
-      {
-        href: "/system",
-        label: "System",
-        icon: (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8m-4-4v4" />
-          </svg>
-        ),
-      },
-    ],
+    href: "/portfolio",
+    label: "Portfolio",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="7" width="20" height="14" rx="2" />
+        <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+        <polyline points="12 12 12 16" /><line x1="10" y1="14" x2="14" y2="14" />
+      </svg>
+    ),
+  },
+  {
+    href: "/opportunities",
+    label: "Opportunities",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+      </svg>
+    ),
+  },
+  {
+    href: "/research",
+    label: "Research",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+        <line x1="11" y1="8" x2="11" y2="14" /><line x1="8" y1="11" x2="14" y2="11" />
+      </svg>
+    ),
+  },
+  {
+    href: "/intelligence",
+    label: "Intelligence",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    ),
+  },
+  {
+    href: "/knowledge",
+    label: "Knowledge",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12" />
+      </svg>
+    ),
+  },
+];
+
+const SYSTEM_NAV = [
+  {
+    href: "/automation",
+    label: "Automation",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+      </svg>
+    ),
+  },
+  {
+    href: "/system",
+    label: "System",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8m-4-4v4" />
+      </svg>
+    ),
   },
 ];
 
@@ -150,11 +114,8 @@ function NavItem({ href, label, icon, active }: { href: string; label: string; i
 
 export function Sidebar() {
   const pathname = usePathname();
-
-  const isActive = (href: string) =>
-    pathname === href || (href !== "/" && pathname.startsWith(href));
-
-  const allItems = NAV_GROUPS.flatMap(g => g.items);
+  const isActive = (href: string) => pathname === href || (href !== "/" && pathname.startsWith(href));
+  const allItems = [...PRIMARY_NAV, ...SYSTEM_NAV];
 
   return (
     <>
@@ -170,27 +131,23 @@ export function Sidebar() {
           </div>
         </div>
 
-        <nav className="flex-1 p-3 space-y-4 overflow-y-auto">
-          {NAV_GROUPS.map(group => (
-            <div key={group.label}>
-              <div className="px-3 pb-1 text-[10px] font-semibold text-[#AAAAAA] tracking-widest uppercase">
-                {group.label}
-              </div>
-              <div className="space-y-0.5">
-                {group.items.map(item => (
-                  <NavItem key={item.href} {...item} active={isActive(item.href)} />
-                ))}
-              </div>
-            </div>
+        <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
+          {PRIMARY_NAV.map(item => (
+            <NavItem key={item.href} {...item} active={isActive(item.href)} />
           ))}
         </nav>
 
-        <div className="px-5 py-4 border-t border-[#EEEEEE]">
-          <div className="text-xs text-[#AAAAAA]">Investment OS · 10 views</div>
+        <div className="p-3 border-t border-[#EEEEEE]">
+          <div className="px-3 pb-1 text-[10px] font-semibold text-[#AAAAAA] tracking-widest uppercase">System</div>
+          <div className="space-y-0.5">
+            {SYSTEM_NAV.map(item => (
+              <NavItem key={item.href} {...item} active={isActive(item.href)} />
+            ))}
+          </div>
         </div>
       </aside>
 
-      {/* Mobile top bar — shows only the 7 nav icons */}
+      {/* Mobile top bar */}
       <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-white border-b border-[#EEEEEE] flex items-center justify-between px-4 py-3">
         <span className="text-[#171A20] font-medium text-sm flex items-center gap-1.5">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3E6AE1" strokeWidth="2">

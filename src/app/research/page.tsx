@@ -799,10 +799,12 @@ const TABS: { id: TabId; label: string }[] = [
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-type HubTab = "search" | "dossiers" | "filings" | "earnings" | "universe";
+type HubTab = "search" | "dossiers" | "themes" | "theses" | "filings" | "earnings" | "universe";
 const HUB_TABS: { id: HubTab; label: string }[] = [
-  { id: "search",    label: "Search" },
+  { id: "search",    label: "Companies" },
   { id: "dossiers",  label: "Dossiers" },
+  { id: "themes",    label: "Themes" },
+  { id: "theses",    label: "Thesis History" },
   { id: "filings",   label: "Filings" },
   { id: "earnings",  label: "Earnings" },
   { id: "universe",  label: "Universe" },
@@ -823,9 +825,13 @@ export default function ResearchPage() {
   const [filings, setFilings] = useState<FilingRow[]>([]);
   const [earnings, setEarnings] = useState<EarningsRow[]>([]);
   const [universe, setUniverse] = useState<UniverseRow[]>([]);
-  const [hubLoading, setHubLoading] = useState<Record<HubTab, boolean>>({ search: false, dossiers: false, filings: false, earnings: false, universe: false });
-  const hubFetchedRef = useRef<Record<HubTab, boolean>>({ search: false, dossiers: false, filings: false, earnings: false, universe: false });
+  const [hubLoading, setHubLoading] = useState<Record<HubTab, boolean>>({ search: false, dossiers: false, themes: false, theses: false, filings: false, earnings: false, universe: false });
+  const hubFetchedRef = useRef<Record<HubTab, boolean>>({ search: false, dossiers: false, themes: false, theses: false, filings: false, earnings: false, universe: false });
   const [hubErrors, setHubErrors] = useState<Partial<Record<HubTab, string>>>({});
+  const [thesesList, setThesesList] = useState<{ id: string; ticker: string; title: string; confidenceScore: number; status: string; isDraft: boolean; lastReviewedAt: string | null }[]>([]);
+  const [selectedTheme, setSelectedTheme] = useState<string | null>(null);
+  const [themeContent, setThemeContent] = useState<string>("");
+  const [themeLoading, setThemeLoading] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -876,7 +882,31 @@ export default function ResearchPage() {
         .catch(() => setHubErrors(p => ({ ...p, universe: "Failed to load universe." })))
         .finally(() => setHubLoading(p => ({ ...p, universe: false })));
     }
-  }, [hubTab, filings.length, earnings.length, universe.length]);
+    if (hubTab === "theses" && thesesList.length === 0 && !hubFetchedRef.current.theses) {
+      hubFetchedRef.current.theses = true;
+      setHubLoading(p => ({ ...p, theses: true }));
+      fetch("/api/investment-theses")
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+        .then(d => setThesesList(d.theses ?? []))
+        .catch(() => setHubErrors(p => ({ ...p, theses: "Failed to load theses." })))
+        .finally(() => setHubLoading(p => ({ ...p, theses: false })));
+    }
+  }, [hubTab, filings.length, earnings.length, universe.length, thesesList.length]);
+
+  async function loadThemeContent(theme: string) {
+    setSelectedTheme(theme);
+    setThemeContent("");
+    setThemeLoading(true);
+    try {
+      const res = await fetch(`/api/wiki/theme?name=${encodeURIComponent(theme)}`);
+      const data = await res.json();
+      setThemeContent(data.context ?? "No wiki content for this theme yet.");
+    } catch {
+      setThemeContent("Failed to load theme content.");
+    } finally {
+      setThemeLoading(false);
+    }
+  }
 
   const handleGenerate = useCallback(async (ticker: string, force = false) => {
     setGeneratingTickers(prev => new Set(prev).add(ticker));
@@ -949,9 +979,7 @@ export default function ResearchPage() {
       {/* Header */}
       <div>
         <h1 className="text-xl font-semibold text-[#171A20]">Research</h1>
-        <p className="text-xs text-[#8E8E8E] mt-0.5">
-          Research hub · dossiers · filings · earnings · universe
-        </p>
+        <p className="text-xs text-[#8E8E8E] mt-0.5">Why do I own this?</p>
       </div>
 
       {error && (
@@ -1078,6 +1106,88 @@ export default function ResearchPage() {
                     )}
                   </div>
                 </div>
+            </div>
+          )}
+
+          {/* ── Themes hub tab ── */}
+          {hubTab === "themes" && (() => {
+            const THEMES = ["AI Infrastructure", "Semiconductors", "Healthcare", "Defense", "Cybersecurity"];
+            return (
+              <div className="space-y-4">
+                <p className="text-xs text-[#8E8E8E]">Investment themes — click to view wiki content.</p>
+                <div className="flex flex-wrap gap-2">
+                  {THEMES.map(t => (
+                    <button
+                      key={t}
+                      onClick={() => loadThemeContent(t)}
+                      className="px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors"
+                      style={selectedTheme === t
+                        ? { backgroundColor: "#EEF3FD", color: "#3E6AE1", borderColor: "#3E6AE1" }
+                        : { backgroundColor: "white", color: "#5C5E62", borderColor: "#EEEEEE" }}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+                {selectedTheme && (
+                  <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+                    <div className="text-sm font-semibold text-[#171A20] mb-3">{selectedTheme}</div>
+                    {themeLoading ? (
+                      <div className="text-sm text-[#8E8E8E]">Loading…</div>
+                    ) : (
+                      <pre className="text-xs text-[#5C5E62] whitespace-pre-wrap font-mono leading-relaxed">
+                        {themeContent || "No wiki content for this theme yet."}
+                      </pre>
+                    )}
+                  </div>
+                )}
+                {!selectedTheme && (
+                  <div className="text-center py-12 text-sm text-[#8E8E8E]">Select a theme above to view its wiki content.</div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* ── Theses hub tab ── */}
+          {hubTab === "theses" && (
+            <div className="space-y-3">
+              <p className="text-xs text-[#8E8E8E]">Investment thesis history — all positions and watchlist tickers.</p>
+              {hubLoading.theses ? (
+                <div className="py-8 text-center text-sm text-[#8E8E8E]">Loading theses…</div>
+              ) : hubErrors.theses ? (
+                <div className="py-8 text-center text-sm text-[#DC2626]">{hubErrors.theses}</div>
+              ) : thesesList.length === 0 ? (
+                <div className="py-8 text-center text-sm text-[#8E8E8E]">No theses yet.</div>
+              ) : (
+                thesesList.map(t => {
+                  const statusColors: Record<string, { bg: string; text: string }> = {
+                    intact:     { bg: "#F0FDF4", text: "#15803D" },
+                    weakening:  { bg: "#FFFBEB", text: "#D97706" },
+                    broken:     { bg: "#FEF2F2", text: "#DC2626" },
+                    monitoring: { bg: "#EEF3FD", text: "#3E6AE1" },
+                  };
+                  const sc = statusColors[t.status] ?? { bg: "#F4F4F4", text: "#5C5E62" };
+                  const confColor = t.confidenceScore >= 8 ? "#15803D" : t.confidenceScore >= 6 ? "#D97706" : "#DC2626";
+                  return (
+                    <div key={t.id} className="bg-white border border-[#EEEEEE] rounded-xl px-4 py-3 flex items-center gap-3">
+                      <span className="font-semibold text-sm text-[#171A20] w-16">{t.ticker}</span>
+                      <span className="flex-1 text-xs text-[#5C5E62] truncate">{t.title}</span>
+                      <span className="text-xs font-semibold" style={{ color: confColor }}>{t.confidenceScore}/10</span>
+                      <span
+                        className="text-[10px] font-semibold px-2 py-0.5 rounded uppercase"
+                        style={{ backgroundColor: sc.bg, color: sc.text }}
+                      >
+                        {t.isDraft ? "draft" : t.status}
+                      </span>
+                      {t.lastReviewedAt && (
+                        <span className="text-[11px] text-[#AAAAAA] shrink-0">
+                          {new Date(t.lastReviewedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           )}
 

@@ -990,11 +990,18 @@ model PortfolioArchitectureReview {
 
   // Hedge Audit — Phase 16.1 (scalar fields for trend queries)
   hedgeScore        Float?  // 0–100 composite hedge effectiveness score
-  hedgeVerdict      String? // INCREASE | KEEP | REDUCE | REMOVE
+  hedgeVerdict      String? // KEEP | REDUCE | REPLACE | REMOVE
   hedgeCorrelation  Float?  // Pearson r: GLDM vs portfolio returns (negative = good hedge)
   drawdownBenefit   Float?  // % reduction in max drawdown from holding gold
   returnDrag        Float?  // % return cost of holding gold over lookback window
   hedgeAuditDetail  String? // JSON: HedgeAuditResult (full breakdown for UI rendering)
+
+  // Hedge Efficiency Ranking — Phase 16.3
+  hedgeRankingDetail         String? // JSON: HedgeEfficiencyResult[]
+  replacementScenariosDetail String? // JSON: ReplacementScenario[]
+
+  // Regime Hedge Report — Phase 16.4
+  regimeHedgeReportDetail    String? // JSON: RegimeHedgeReport
 
   // Context at generation time
   marketRegime         String
