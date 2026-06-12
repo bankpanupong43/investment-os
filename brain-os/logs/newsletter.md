@@ -96,3 +96,33 @@ status: stored
 ---
 
 **Run: 2026-06-11 17:46:36** — 0 new, 15 skipped, 0 errors
+
+---
+
+**Run: 2026-06-12 01:16:49** — 0 new, 0 skipped, 1 errors
+
+Errors:
+- Gmail: The operation was aborted due to timeout
+
+---
+
+**Run: 2026-06-12 01:19:38** — 2 new, 15 skipped, 0 errors
+
+[newsletter]
+source: Axios Markets
+title: 🚀 SpaceX raises $75B in IPO
+date: 2026-06-11
+status: stored
+
+[newsletter]
+source: Axios Markets
+title: ⚽️ Axios PM: World Cup watch
+date: 2026-06-11
+status: stored
+
+---
+
+**Run: 2026-06-12 01:26:38** — 0 new, 0 skipped, 1 errors
+
+Errors:
+- Gmail: The operation was aborted due to timeout

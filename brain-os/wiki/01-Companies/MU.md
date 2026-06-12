@@ -29,12 +29,17 @@ Micron Technology, Inc. is a Technology business scoring 81.5/100 on the company
 
 ## Key Metrics
 
+| Objective Score | 81.5 | 2026-06-12 |
+| Opportunity Score | 74.8 | 2026-06-12 |
+
 | Metric | Value | As Of |
 |--------|-------|-------|
 | Objective Score | 81.5 | 2026-06-11 |
 | Opportunity Score | 74.8 | 2026-06-11 |
 
 ## Recent Events
+
+**2026-06-12:** Micron Technology, Inc. is a global leader specializing in the development, manufacture, and sale of advanced semiconductor memory and storage solutions. Its operations are structured across four primary business segments: Compute and Networking, Mobile, Storage, and Embedded. The company's product portfolio encompasses a range of memory and data storage technologies. These include high-speed, low-latency Dynamic Random Access Memory (DRAM) components for rapid data retrieval; non-volatile, re-programmable NAND flash storage devices; and fast-read, non-volatile, re-writable NOR memory chips. T
 
 ## Decision History
 

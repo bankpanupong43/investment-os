@@ -14,6 +14,9 @@
 - [[TSM]] — High opportunity score — quality compounder gap (Opportunity Engine)
 - [[ASML]] — High opportunity score — quality compounder gap (Opportunity Engine)
 
+- [[TSM]] — High opportunity score — quality compounder gap (Opportunity Engine)
+- [[ASML]] — High opportunity score — quality compounder gap (Opportunity Engine)
+
 ## Opportunities
 
 

@@ -28,12 +28,17 @@ Apple Inc. is a Technology business scoring 74/100 on the company ranking model 
 
 ## Key Metrics
 
+| Objective Score | 74 | 2026-06-12 |
+| Opportunity Score | 60.8 | 2026-06-12 |
+
 | Metric | Value | As Of |
 |--------|-------|-------|
 | Objective Score | 74 | 2026-06-11 |
 | Opportunity Score | 60.8 | 2026-06-11 |
 
 ## Recent Events
+
+**2026-06-12:** Apple Inc. is a global technology corporation that specializes in the conceptualization, production, and sale of a diverse suite of electronic devices. Its comprehensive hardware lineup features the well-known iPhone smartphones, Mac personal computers, and versatile iPad tablets. The company also supplies a range of wearables, smart home products, and accessories, including AirPods, Apple TV, Apple Watch, items from the Beats brand, and HomePod speakers. Beyond its device offerings, Apple delivers essential support services like AppleCare and robust cloud solutions. It oversees key digital pl
 
 ## Decision History
 

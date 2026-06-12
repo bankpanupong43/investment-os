@@ -12,8 +12,10 @@ import { computeOpportunities, saveOpportunityScores } from "./opportunity-engin
 import { generateMorningBrief, saveMorningBrief } from "./morning-brief-engine";
 import { generateRadarCandidates, saveRadarCandidates } from "./radar-engine";
 import { generateBlueprint, saveBlueprint } from "./architect-engine";
+import { generateArchitectureReview, saveArchitectureReview, writeHedgeAuditToWiki } from "./architecture-review-engine";
 import { runMacroIngestion } from "./macro-ingestion";
 import { runNewsletterRefresh } from "./newsletter-engine";
+import { generatePortfolioDecisionReviews, saveDecisionReview } from "./decision-review-engine";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,6 +73,8 @@ export const JOB_NAMES = [
   "brain_os_export",
   "radar_refresh",
   "portfolio_architect",
+  "portfolio_architecture_review",
+  "decision_review",
 ] as const;
 
 export type JobName = typeof JOB_NAMES[number];
@@ -94,6 +98,8 @@ export const JOB_LABELS: Record<JobName, string> = {
   morning_brief: "Morning Brief",
   radar_refresh: "Discovery Radar",
   portfolio_architect: "Portfolio Architect",
+  portfolio_architecture_review: "Portfolio Architecture Review",
+  decision_review: "Decision Review",
 };
 
 // Each job function returns a JobResult
@@ -113,6 +119,8 @@ const JOB_RUNNERS: Record<JobName, () => Promise<JobResult>> = {
   morning_brief: runMorningBrief,
   radar_refresh: runRadarRefresh,
   portfolio_architect: runPortfolioArchitect,
+  portfolio_architecture_review: runPortfolioArchitectureReview,
+  decision_review: runDecisionReview,
 };
 
 // ─── Individual job implementations ──────────────────────────────────────────
@@ -273,6 +281,77 @@ async function runPortfolioArchitect(): Promise<JobResult> {
   return {
     success: true,
     summary: `Blueprint generated: ${data.marketRegime} regime. ${data.gapAnalysis.length} gaps. ${topGap ? `Top gap: ${topGap.dimension} (${topGap.gap > 0 ? "+" : ""}${topGap.gap.toFixed(0)}%)` : "No critical gaps."}. Blueprint ID: ${record.id}`,
+  };
+}
+
+async function runPortfolioArchitectureReview(): Promise<JobResult> {
+  // Monthly gate — skip unless today is the 1st of the month
+  const today = new Date();
+  if (today.getDate() !== 1) {
+    return { success: true, summary: "Skipped — portfolio architecture review runs on the 1st of each month" };
+  }
+  const data = await generateArchitectureReview();
+  const record = await saveArchitectureReview(data);
+  if (data.hedgeAudit) writeHedgeAuditToWiki(data.hedgeAudit, data.reviewDate);
+  const topRec = data.recommendations[0];
+  return {
+    success: true,
+    summary: `Architecture review: ${data.architectureScore.total}/100 (${data.architectureScore.grade} — ${data.architectureScore.label}). ${data.recommendations.length} recommendations.${topRec ? ` Top: [${topRec.priority}] ${topRec.action}` : ""} Record ID: ${record.id}`,
+  };
+}
+
+async function runDecisionReview(): Promise<JobResult> {
+  // Monthly gate — first Saturday of the month only
+  const today = new Date();
+  const dayOfWeek = today.getDay(); // 0=Sun, 6=Sat
+  const dayOfMonth = today.getDate();
+  if (dayOfWeek !== 6 || dayOfMonth > 7) {
+    return { success: true, summary: "Skipped — decision review runs on first Saturday of the month" };
+  }
+
+  const reviews = await generatePortfolioDecisionReviews();
+  const saved: string[] = [];
+  const errors: string[] = [];
+
+  for (const review of reviews) {
+    try {
+      await saveDecisionReview(review);
+      saved.push(review.ticker);
+
+      // Wiki: create review page + bidirectional backlink
+      try {
+        const { createReviewPage, addReviewBacklinkToCompanyPage } = await import("./wiki-service");
+        const slug = createReviewPage(review.ticker, {
+          ticker: review.ticker,
+          reviewDate: review.reviewDate,
+          originalThesis: review.originalThesis,
+          thesisStatus: review.thesisStatus,
+          evidenceFor: review.evidenceFor,
+          evidenceAgainst: review.evidenceAgainst,
+          opportunityScore: review.opportunityScore,
+          architectureContext: review.architectureContext,
+          verdict: review.verdict,
+          confidence: review.confidence,
+          lessonLearned: review.lessonLearned,
+        });
+        addReviewBacklinkToCompanyPage(review.ticker, slug);
+      } catch (wikiErr) {
+        console.error(`[decision_review] wiki failed for ${review.ticker}:`, wikiErr);
+      }
+    } catch (err) {
+      errors.push(`${review.ticker}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  const verdictCounts = reviews.reduce<Record<string, number>>((acc, r) => {
+    acc[r.verdict] = (acc[r.verdict] ?? 0) + 1;
+    return acc;
+  }, {});
+  const verdictSummary = Object.entries(verdictCounts).map(([v, n]) => `${n} ${v}`).join(", ");
+
+  return {
+    success: errors.length < Math.max(reviews.length, 1),
+    summary: `Decision reviews: ${saved.length} saved (${verdictSummary}).${errors.length > 0 ? ` Errors: ${errors.slice(0, 2).join("; ")}` : ""}`,
   };
 }
 

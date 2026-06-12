@@ -1,13 +1,11 @@
-"use client";
 import { NextRequest, NextResponse } from "next/server";
-import { upsertThemePage } from "@/lib/wiki-service";
+import { assembleThemeContext } from "@/lib/wiki-assemblers";
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    upsertThemePage(body);
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const name = req.nextUrl.searchParams.get("name");
+  if (!name) {
+    return NextResponse.json({ error: "name parameter is required" }, { status: 400 });
   }
+  const context = assembleThemeContext(name);
+  return NextResponse.json({ theme: name, context });
 }

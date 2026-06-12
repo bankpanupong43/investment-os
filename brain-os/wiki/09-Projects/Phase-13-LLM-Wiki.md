@@ -34,4 +34,4 @@ Transform Investment OS from a stock dashboard into a personal investment operat
 
 ## Related Pages
 
-[[Portfolio]] [[NVDA]] [[AI Infrastructure]]
+[[Portfolio]] [[NVDA]] [[AI-Infrastructure]]

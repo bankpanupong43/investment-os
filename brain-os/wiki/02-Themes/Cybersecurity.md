@@ -14,6 +14,9 @@
 - [[MSFT]] — Investment committee: Strong Buy (CommitteeSession DB)
 - [[SAP]] — High opportunity score — quality compounder gap (Opportunity Engine)
 
+- [[MSFT]] — Investment committee: Strong Buy (CommitteeSession DB)
+- [[SAP]] — High opportunity score — quality compounder gap (Opportunity Engine)
+
 ## Opportunities
 
 

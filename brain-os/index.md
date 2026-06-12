@@ -27,7 +27,7 @@
 - [[Semiconductors]]
 - [[Cybersecurity]]
 - [[Healthcare]]
-- [[AI Infrastructure]]
+- [[AI-Infrastructure]]
 <!-- THEMES_END -->
 
 ## Macro

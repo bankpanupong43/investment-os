@@ -1,13 +1,11 @@
-"use client";
 import { NextRequest, NextResponse } from "next/server";
-import { upsertCompanyPage } from "@/lib/wiki-service";
+import { assembleTickerContext } from "@/lib/wiki-assemblers";
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    upsertCompanyPage(body);
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const ticker = req.nextUrl.searchParams.get("ticker");
+  if (!ticker) {
+    return NextResponse.json({ error: "ticker parameter is required" }, { status: 400 });
   }
+  const context = assembleTickerContext(ticker);
+  return NextResponse.json({ ticker: ticker.toUpperCase(), context });
 }

@@ -1,15 +1,21 @@
 /**
  * wiki-service.ts — Brain OS wiki page generators + index/log maintenance.
  * Markdown-only, Obsidian-compatible, append-never-overwrite for existing thesis sections.
+ *
+ * Path resolution order:
+ *   1. BRAIN_OS_ROOT env var
+ *   2. resolveBrainOsPath() → D:\Projects\shared\Brain OS (or G: drive equivalent)
+ *   3. process.cwd()/brain-os (local fallback for machines without shared storage)
  */
 
 import fs from "fs";
 import path from "path";
+import { resolveBrainOsPath } from "./shared-paths";
 
-const BRAIN_OS = path.join(process.cwd(), "brain-os");
-const WIKI = path.join(BRAIN_OS, "wiki");
-const LOG_FILE = path.join(BRAIN_OS, "logs", "log.md");
-const INDEX_FILE = path.join(BRAIN_OS, "index.md");
+const BRAIN_OS_ROOT = process.env.BRAIN_OS_ROOT ?? resolveBrainOsPath() ?? path.join(process.cwd(), "brain-os");
+const WIKI = path.join(BRAIN_OS_ROOT, "07 Investment", "Wiki");
+const LOG_FILE = path.join(BRAIN_OS_ROOT, "03 Knowledge", "log.md");
+const INDEX_FILE = path.join(BRAIN_OS_ROOT, "03 Knowledge", "index.md");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -23,7 +29,7 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function appendLog(type: "ingest" | "dossier" | "radar" | "brief" | "decision" | "daily", subject: string) {
+function appendLog(type: "ingest" | "dossier" | "radar" | "brief" | "decision" | "daily" | "review", subject: string) {
   ensureDir(path.dirname(LOG_FILE));
   const entry = `\n## [${today()}] ${type} | ${subject}\n`;
   fs.appendFileSync(LOG_FILE, entry, "utf8");
@@ -125,7 +131,7 @@ ${related}
 }
 
 export function upsertCompanyPage(input: CompanyPageInput) {
-  const filePath = path.join(WIKI, "01-Companies", `${input.ticker}.md`);
+  const filePath = path.join(WIKI, "Companies", `${input.ticker}.md`);
   const existing = readFile(filePath);
 
   if (!existing) {
@@ -200,7 +206,7 @@ ${related}
 
 export function upsertThemePage(input: ThemePageInput) {
   const slug = input.name.replace(/\s+/g, "-");
-  const filePath = path.join(WIKI, "02-Themes", `${slug}.md`);
+  const filePath = path.join(WIKI, "Themes", `${slug}.md`);
   const existing = readFile(filePath);
 
   if (!existing) {
@@ -220,7 +226,7 @@ export function upsertThemePage(input: ThemePageInput) {
 // ---------------------------------------------------------------------------
 
 export function appendMacroNote(content: string, date = today()) {
-  const filePath = path.join(WIKI, "03-Macro", `${date}.md`);
+  const filePath = path.join(WIKI, "Macro", `${date}.md`);
   if (!readFile(filePath)) {
     writeFile(filePath, `# Macro — ${date}\n\n${content}\n`);
   } else {
@@ -229,7 +235,7 @@ export function appendMacroNote(content: string, date = today()) {
 }
 
 export function appendGeopoliticsNote(content: string, date = today()) {
-  const filePath = path.join(WIKI, "04-Geopolitics", `${date}.md`);
+  const filePath = path.join(WIKI, "Geopolitics", `${date}.md`);
   if (!readFile(filePath)) {
     writeFile(filePath, `# Geopolitics — ${date}\n\n${content}\n`);
   } else {
@@ -295,7 +301,7 @@ ${decisions}
 
 ## Related Pages
 
-[[Portfolio]] [[03-Macro/${date}]] [[04-Geopolitics/${date}]]
+[[Portfolio]] [[Macro/${date}]] [[Geopolitics/${date}]]
 `;
     writeFile(filePath, content);
   } else {
@@ -334,7 +340,7 @@ export function createDecisionPage(input: DecisionInput): string {
   const evidence = input.evidence?.map((e) => `- ${e}`).join("\n") ?? "";
   const alts = input.alternativesConsidered?.map((a) => `- ${a}`).join("\n") ?? "";
 
-  const filePath = path.join(WIKI, "06-Decisions", `${date}-${input.action.toLowerCase()}-${input.ticker}.md`);
+  const filePath = path.join(WIKI, "Decisions", `${date}-${input.action.toLowerCase()}-${input.ticker}.md`);
 
   const content = `# Decision: ${input.action} ${input.ticker} — ${date}
 
@@ -377,6 +383,185 @@ ${input.reviewDate ?? ""}
   appendLog("decision", `${input.action} ${input.ticker}`);
   updateIndexSection("Decisions", `- [[${date}-${input.action.toLowerCase()}-${input.ticker}]] — ${input.action} ${input.ticker}`);
   return filePath;
+}
+
+// ---------------------------------------------------------------------------
+// Read Layer (Phase 15)
+// ---------------------------------------------------------------------------
+
+export interface WikiPage {
+  path: string;
+  content: string;
+  exists: boolean;
+}
+
+function listDateFiles(dir: string): string[] {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter(f => f.endsWith(".md") && /^\d{4}-\d{2}-\d{2}\.md$/.test(f))
+    .sort()
+    .reverse();
+}
+
+export function getCompanyPage(ticker: string): WikiPage {
+  const filePath = path.join(WIKI, "Companies", `${ticker.toUpperCase()}.md`);
+  const content = readFile(filePath);
+  return { path: filePath, content, exists: content.length > 0 };
+}
+
+export function getThemePage(theme: string): WikiPage {
+  const slug = theme.replace(/\s+/g, "-");
+  const filePath = path.join(WIKI, "Themes", `${slug}.md`);
+  const content = readFile(filePath);
+  return { path: filePath, content, exists: content.length > 0 };
+}
+
+export function getPortfolioPage(): WikiPage {
+  const filePath = path.join(WIKI, "Portfolio", "Portfolio.md");
+  const content = readFile(filePath);
+  return { path: filePath, content, exists: content.length > 0 };
+}
+
+export function getRecentDailyNotes(limit = 7): WikiPage[] {
+  const dir = path.join(WIKI, "Daily");
+  return listDateFiles(dir).slice(0, limit).map(f => {
+    const filePath = path.join(dir, f);
+    const content = readFile(filePath);
+    return { path: filePath, content, exists: content.length > 0 };
+  });
+}
+
+export function getRecentMacroNotes(limit = 7): WikiPage[] {
+  const dir = path.join(WIKI, "Macro");
+  return listDateFiles(dir).slice(0, limit).map(f => {
+    const filePath = path.join(dir, f);
+    const content = readFile(filePath);
+    return { path: filePath, content, exists: content.length > 0 };
+  });
+}
+
+export function getRecentGeopoliticsNotes(limit = 7): WikiPage[] {
+  const dir = path.join(WIKI, "Geopolitics");
+  return listDateFiles(dir).slice(0, limit).map(f => {
+    const filePath = path.join(dir, f);
+    const content = readFile(filePath);
+    return { path: filePath, content, exists: content.length > 0 };
+  });
+}
+
+export function getDecisionPages(ticker?: string): WikiPage[] {
+  const dir = path.join(WIKI, "Decisions");
+  if (!fs.existsSync(dir)) return [];
+  let files = fs.readdirSync(dir).filter(f => f.endsWith(".md"));
+  if (ticker) {
+    const t = ticker.toLowerCase();
+    files = files.filter(f => f.toLowerCase().endsWith(`-${t}.md`));
+  }
+  return files.sort().reverse().map(f => {
+    const filePath = path.join(dir, f);
+    const content = readFile(filePath);
+    return { path: filePath, content, exists: content.length > 0 };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Decision Reviews (Phase 17)
+// ---------------------------------------------------------------------------
+
+export interface ReviewPageInput {
+  ticker: string;
+  reviewDate: Date;
+  originalThesis: string;
+  thesisStatus: string;
+  evidenceFor: string[];
+  evidenceAgainst: string[];
+  opportunityScore: number;
+  architectureContext: { score: number; grade: string; tickerNotes: string[] };
+  verdict: string;
+  confidence: number;
+  lessonLearned: string;
+}
+
+/** Creates wiki/Decisions/Reviews/YYYY-MM-TICKER-Review.md and returns the file slug. */
+export function createReviewPage(ticker: string, input: ReviewPageInput): string {
+  const month = input.reviewDate.toISOString().slice(0, 7); // "2026-07"
+  const slug = `${month}-${ticker}-Review`;
+  const filePath = path.join(WIKI, "Decisions", "Reviews", `${slug}.md`);
+
+  const forBullets = input.evidenceFor.length > 0
+    ? input.evidenceFor.map((e) => `- ${e}`).join("\n")
+    : "- No supporting evidence in recent intelligence";
+  const againstBullets = input.evidenceAgainst.length > 0
+    ? input.evidenceAgainst.map((e) => `- ${e}`).join("\n")
+    : "- No contradicting evidence in recent intelligence";
+
+  const archNotes = input.architectureContext.tickerNotes.length > 0
+    ? input.architectureContext.tickerNotes.map((n) => `- ${n}`).join("\n")
+    : "- No specific architecture notes for this position";
+
+  const content = `# Decision Review — ${ticker}
+
+**Review Date:** ${input.reviewDate.toISOString().slice(0, 10)}
+**Generated:** ${today()}
+
+---
+
+## Original Thesis
+
+${input.originalThesis || "No thesis on record."}
+
+## Current Evidence
+
+### Supporting
+
+${forBullets}
+
+### Contradicting
+
+${againstBullets}
+
+## Thesis Drift
+
+${input.thesisStatus}
+
+## Opportunity Context
+
+Score: ${input.opportunityScore.toFixed(0)}/100
+
+## Architecture Context
+
+Grade: ${input.architectureContext.grade} (${input.architectureContext.score.toFixed(0)}/100)
+
+${archNotes}
+
+## Verdict
+
+${input.verdict}
+
+## Confidence
+
+${input.confidence}
+
+## Lessons Learned
+
+${input.lessonLearned}
+
+## Related Pages
+
+[[${ticker}]] [[Portfolio]]
+`;
+
+  writeFile(filePath, content);
+  appendLog("review", `${ticker} ${month}`);
+  updateIndexSection("Decisions", `- [[${slug}]] — ${ticker} review ${month}`);
+  return slug;
+}
+
+/** Adds a wikilink backlink to the ## Decision History section of the company page. */
+export function addReviewBacklinkToCompanyPage(ticker: string, reviewSlug: string) {
+  const filePath = path.join(WIKI, "Companies", `${ticker.toUpperCase()}.md`);
+  if (!readFile(filePath)) return; // company page doesn't exist yet — skip
+  appendToSection(filePath, "Decision History", `- [[${reviewSlug}]] — review`);
 }
 
 // ---------------------------------------------------------------------------

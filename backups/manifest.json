@@ -206,5 +206,29 @@
     "fileSize": 5850367,
     "checksum": "3bf98b6547fce6c39f33019c896b710e42e5a3115c2b949c1fedb53f5afb8ef4",
     "createdAt": "2026-06-11T01:42:45.723Z"
+  },
+  {
+    "id": "cmqa8uv0v000155y94waq8k1h",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-06-12-082449",
+    "fileSize": 5850367,
+    "checksum": "d0c2ae93cd649ccd12622f1af0b372b6b1269fb7521cc41d709e788f3bb52f7f",
+    "createdAt": "2026-06-12T01:24:49.423Z"
+  },
+  {
+    "id": "cmqa8uv0z000255y986p2lwb1",
+    "backupType": "full_snapshot",
+    "filePath": "backups/full/2026-06-12-082449",
+    "fileSize": 6623809,
+    "checksum": "1e53dfdf7d2d8c9d713de81b1412b7b6ecf083338a406e8f08deaaebfc9650b3",
+    "createdAt": "2026-06-12T01:24:49.427Z"
+  },
+  {
+    "id": "cmqa8xb6i00am55y97w7jir88",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-06-12-082643",
+    "fileSize": 5947197,
+    "checksum": "75330012ae102f5c77d7d19c1f885f72745323c335afc9a3b759a27f6965e787",
+    "createdAt": "2026-06-12T01:26:43.674Z"
   }
 ]

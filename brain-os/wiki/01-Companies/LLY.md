@@ -30,6 +30,8 @@ Investment committee: Buy (CommitteeSession DB)
 
 ## Recent Events
 
+**2026-06-12:** Investment committee: Buy (CommitteeSession DB)
+
 ## Decision History
 
 ## Related Pages

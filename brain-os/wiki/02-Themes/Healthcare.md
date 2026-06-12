@@ -15,6 +15,10 @@
 - [[NVO]] — Investment committee: Strong Buy (CommitteeSession DB)
 - [[PCVX]] — Adds sector not currently in portfolio (Portfolio Analysis)
 
+- [[LLY]] — Investment committee: Buy (CommitteeSession DB)
+- [[NVO]] — Investment committee: Strong Buy (CommitteeSession DB)
+- [[PCVX]] — Adds sector not currently in portfolio (Portfolio Analysis)
+
 ## Opportunities
 
 

@@ -30,6 +30,8 @@ High opportunity score — quality compounder gap (Opportunity Engine)
 
 ## Recent Events
 
+**2026-06-12:** High opportunity score — quality compounder gap (Opportunity Engine)
+
 ## Decision History
 
 ## Related Pages

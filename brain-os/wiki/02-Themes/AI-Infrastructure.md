@@ -18,6 +18,13 @@ The buildout of compute, networking, and software infrastructure required to tra
 - [[ASML]] — High opportunity score — quality compounder gap (Opportunity Engine)
 - [[SAP]] — High opportunity score — quality compounder gap (Opportunity Engine)
 
+- [[MSFT]] — Investment committee: Strong Buy (CommitteeSession DB)
+- [[GOOGL]] — High opportunity score — quality compounder gap (Opportunity Engine)
+- [[META]] — Investment committee: Watch (CommitteeSession DB)
+- [[TSM]] — High opportunity score — quality compounder gap (Opportunity Engine)
+- [[ASML]] — High opportunity score — quality compounder gap (Opportunity Engine)
+- [[SAP]] — High opportunity score — quality compounder gap (Opportunity Engine)
+
 - [[NVDA]] — GPU compute monopoly, CUDA ecosystem
 - [[TSM]] — foundry for all leading AI chips
 - [[MSFT]] — Azure AI, OpenAI partnership

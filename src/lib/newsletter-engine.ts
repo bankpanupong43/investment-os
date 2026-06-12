@@ -16,6 +16,7 @@ import { fetchRecentNewsletterEmails, deduplicateByHash, isGmailConfigured } fro
 import { fetchAllInstitutionalResearch } from "./institutional-research";
 import { processArticle } from "./newsletter-processor";
 import { appendMacroNote, appendGeopoliticsNote } from "./wiki-service";
+import { resolveBrainOsPath } from "./shared-paths";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -208,7 +209,8 @@ export function buildConsensusText(insights: NewsletterInsight[]): string {
 
 function appendNewsletterLog(result: NewsletterRunResult, items: { source: string; title: string; publishedAt: Date; rawHash: string }[]): void {
   try {
-    const logDir = path.join(process.cwd(), "brain-os", "logs");
+    const brainOsRoot = process.env.BRAIN_OS_ROOT ?? resolveBrainOsPath() ?? path.join(process.cwd(), "brain-os");
+    const logDir = path.join(brainOsRoot, "03 Knowledge");
     const logFile = path.join(logDir, "newsletter.md");
 
     if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
