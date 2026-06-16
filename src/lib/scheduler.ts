@@ -16,6 +16,7 @@ import { generateArchitectureReview, saveArchitectureReview, writeHedgeAuditToWi
 import { runMacroIngestion } from "./macro-ingestion";
 import { runNewsletterRefresh } from "./newsletter-engine";
 import { generatePortfolioDecisionReviews, saveDecisionReview } from "./decision-review-engine";
+import { generateThemeScoutReport, saveThemeScoutData, writeThemeScoutToWiki } from "./theme-scout-engine";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,7 @@ export const JOB_NAMES = [
   "portfolio_architect",
   "portfolio_architecture_review",
   "decision_review",
+  "theme_scout",
 ] as const;
 
 export type JobName = typeof JOB_NAMES[number];
@@ -100,6 +102,7 @@ export const JOB_LABELS: Record<JobName, string> = {
   portfolio_architect: "Portfolio Architect",
   portfolio_architecture_review: "Portfolio Architecture Review",
   decision_review: "Decision Review",
+  theme_scout: "Theme Scout",
 };
 
 // Each job function returns a JobResult
@@ -121,6 +124,7 @@ const JOB_RUNNERS: Record<JobName, () => Promise<JobResult>> = {
   portfolio_architect: runPortfolioArchitect,
   portfolio_architecture_review: runPortfolioArchitectureReview,
   decision_review: runDecisionReview,
+  theme_scout: runThemeScout,
 };
 
 // ─── Individual job implementations ──────────────────────────────────────────
@@ -481,6 +485,22 @@ async function runMorningBrief(): Promise<JobResult> {
   return {
     success: true,
     summary: `Morning brief generated: ${data.marketRegime} regime. ${actionCount} actions. ${positivePct} positive positions. Brief ID: ${record.id}`,
+  };
+}
+
+async function runThemeScout(): Promise<JobResult> {
+  const report = await generateThemeScoutReport();
+  await saveThemeScoutData(report.all);
+  writeThemeScoutToWiki(report.all);
+
+  const emerging     = report.emerging.length;
+  const accelerating = report.accelerating.length;
+  const weakening    = report.weakening.length;
+  const top = report.emerging[0] ?? report.accelerating[0];
+
+  return {
+    success: true,
+    summary: `Theme Scout: ${report.all.length} themes scored. ${emerging} emerging, ${accelerating} accelerating, ${weakening} weakening.${top ? ` Top: ${top.theme} (${top.score})` : ""}`,
   };
 }
 

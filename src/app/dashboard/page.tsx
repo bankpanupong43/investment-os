@@ -50,6 +50,14 @@ interface DecisionReview {
   reviewDate: string;
 }
 
+interface PortfolioValue {
+  totalValueThb: number;
+  totalValueUsd: number;
+  usdthb: number;
+  totalCashThb: number;
+  totalEquityUsd: number;
+}
+
 function Skeleton({ className = "" }: { className?: string }) {
   return <div className={`bg-[#EEEEEE] rounded-xl animate-pulse ${className}`} />;
 }
@@ -225,42 +233,51 @@ function ScoreGauge({ label, score, color }: { label: string; score: number | nu
   );
 }
 
-function PortfolioHealthCard({ review }: { review: ArchitectureReview | null }) {
-  if (!review) return (
-    <div className="bg-white border border-[#EEEEEE] rounded-xl p-5">
-      <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest mb-3">Portfolio Health</div>
-      <div className="text-sm text-[#8E8E8E]">No architecture review — run Portfolio Architecture to generate.</div>
-    </div>
-  );
+function fmtThb(n: number): string {
+  return "฿" + n.toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
 
-  const arch = review.architectureScore;
-  const hedgeScore = review.hedgeAudit?.hedgeScore ?? null;
-  const grade = arch.grade;
+function PortfolioHealthCard({ review, portValue }: { review: ArchitectureReview | null; portValue: PortfolioValue | null }) {
+  const arch  = review?.architectureScore;
+  const grade = arch?.grade;
   const gradeColor = grade === "A" ? "#15803D" : grade === "B" ? "#3E6AE1" : grade === "C" ? "#D97706" : "#DC2626";
 
   return (
     <div className="bg-white border border-[#EEEEEE] rounded-xl p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest">Portfolio Health</div>
+        <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest">Portfolio</div>
         <Link href="/portfolio" className="text-[11px] text-[#3E6AE1] hover:underline">Portfolio →</Link>
       </div>
-      <div className="flex items-center gap-3">
-        <div
-          className="w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold border-2"
-          style={{ color: gradeColor, borderColor: gradeColor }}
-        >
-          {grade}
+
+      {/* Live value from PortfolioHolding + CashAccount */}
+      {portValue && portValue.totalValueThb > 0 ? (
+        <div className="space-y-1">
+          <div className="text-2xl font-semibold text-[#171A20] tabular-nums">{fmtThb(portValue.totalValueThb)}</div>
+          <div className="text-xs text-[#8E8E8E] tabular-nums">
+            ${Math.round(portValue.totalValueUsd).toLocaleString()} USD · 1 USD = {portValue.usdthb.toFixed(2)} THB
+          </div>
+          <div className="flex gap-4 pt-1 text-xs text-[#5C5E62]">
+            <span>Equity <span className="font-semibold text-[#171A20]">${Math.round(portValue.totalEquityUsd).toLocaleString()}</span></span>
+            <span>Cash <span className="font-semibold text-[#171A20]">{fmtThb(portValue.totalCashThb)}</span></span>
+          </div>
         </div>
-        <div>
-          <div className="text-xl font-semibold text-[#171A20]">{arch.total}/100</div>
-          <div className="text-xs text-[#8E8E8E]">{arch.label}</div>
+      ) : (
+        <div className="text-sm text-[#8E8E8E]">Add holdings on the Portfolio page to see live value.</div>
+      )}
+
+      {/* Architecture score if available */}
+      {arch && grade && (
+        <div className="flex items-center gap-3 pt-1 border-t border-[#F4F4F4]">
+          <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-2"
+            style={{ color: gradeColor, borderColor: gradeColor }}>
+            {grade}
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-[#171A20]">{arch.total}/100</div>
+            <div className="text-[11px] text-[#8E8E8E]">{arch.label}</div>
+          </div>
         </div>
-      </div>
-      <div className="space-y-2.5">
-        <ScoreGauge label="Architecture" score={arch.total} color="#3E6AE1" />
-        <ScoreGauge label="Hedge Score" score={hedgeScore} color="#15803D" />
-        <ScoreGauge label="Diversification" score={arch.diversification} color="#D97706" />
-      </div>
+      )}
     </div>
   );
 }
@@ -469,6 +486,126 @@ function NewsletterConsensusCard({ brief }: { brief: MorningBrief | null }) {
   );
 }
 
+// ─── Emerging Themes Card ─────────────────────────────────────────────────────
+
+type ThemeStatus   = "emerging" | "accelerating" | "weakening" | "stable";
+type ThemeMomentum = "Rising" | "Stable" | "Falling";
+
+interface ThemeScoutEntry {
+  theme:      string;
+  score:      number;
+  status:     ThemeStatus;
+  momentum:   ThemeMomentum;
+  confidence: string;
+  drivers:    string[];
+  candidates: { ticker: string; reason: string; radarScore: number }[];
+  isExtended: boolean;
+}
+
+interface ThemeScoutReport {
+  emerging:     ThemeScoutEntry[];
+  accelerating: ThemeScoutEntry[];
+  weakening:    ThemeScoutEntry[];
+  all:          ThemeScoutEntry[];
+  generatedAt:  string;
+}
+
+const STATUS_STYLE: Record<ThemeStatus, { bg: string; text: string; label: string }> = {
+  emerging:     { bg: "#EEF3FD", text: "#3E6AE1", label: "Emerging"     },
+  accelerating: { bg: "#F0FDF4", text: "#15803D", label: "Accelerating" },
+  weakening:    { bg: "#FEF2F2", text: "#991B1B", label: "Weakening"    },
+  stable:       { bg: "#F4F4F4", text: "#5C5E62", label: "Stable"       },
+};
+
+const MOMENTUM_ARROW: Record<ThemeMomentum, string> = {
+  Rising:  "↑",
+  Stable:  "→",
+  Falling: "↓",
+};
+
+function EmergingThemesCard({ report, loading }: { report: ThemeScoutReport | null; loading: boolean }) {
+  const top = report
+    ? [...report.emerging, ...report.accelerating].slice(0, 5)
+    : [];
+
+  return (
+    <div className="bg-white border border-[#EEEEEE] rounded-xl p-5 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest">Emerging Themes</div>
+          <div className="text-xs text-[#8E8E8E] mt-0.5">What should I be researching next?</div>
+        </div>
+        <Link href="/ask?q=What+themes+are+emerging%3F" className="text-[11px] text-[#3E6AE1] hover:underline">Ask →</Link>
+      </div>
+
+      {loading ? (
+        <div className="space-y-2">
+          {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-12" />)}
+        </div>
+      ) : top.length === 0 ? (
+        <div className="text-sm text-[#8E8E8E]">
+          No theme signals yet — run the Theme Scout from the Automation page.
+        </div>
+      ) : (
+        <ol className="space-y-2">
+          {top.map((t, i) => {
+            const s = STATUS_STYLE[t.status] ?? STATUS_STYLE.stable;
+            const arrow = MOMENTUM_ARROW[t.momentum] ?? "→";
+            const arrowColor = t.momentum === "Rising" ? "#15803D" : t.momentum === "Falling" ? "#DC2626" : "#8E8E8E";
+            return (
+              <li key={t.theme} className="flex items-start gap-3 p-2 rounded-xl hover:bg-[#F4F4F4] transition-colors">
+                <span className="w-5 text-xs text-[#AAAAAA] font-medium tabular-nums mt-0.5">{i + 1}.</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-[#171A20] truncate">{t.theme}</span>
+                    <span
+                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0"
+                      style={{ backgroundColor: s.bg, color: s.text }}
+                    >
+                      {s.label}
+                    </span>
+                  </div>
+                  {t.drivers[0] && (
+                    <div className="text-xs text-[#8E8E8E] truncate mt-0.5">{t.drivers[0]}</div>
+                  )}
+                  {t.candidates.length > 0 && (
+                    <div className="flex gap-1 mt-1 flex-wrap">
+                      {t.candidates.slice(0, 3).map(c => (
+                        <Link
+                          key={c.ticker}
+                          href={`/research?q=${c.ticker}`}
+                          className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#EEF3FD] text-[#3E6AE1] hover:bg-[#3E6AE1] hover:text-white transition-colors"
+                        >
+                          {c.ticker}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className="text-sm font-bold text-[#171A20] tabular-nums">{t.score}</span>
+                  <span className="text-sm font-bold" style={{ color: arrowColor }}>{arrow}</span>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+
+      {report && (
+        <div className="pt-2 border-t border-[#F4F4F4] flex items-center justify-between">
+          <span className="text-[10px] text-[#AAAAAA]">
+            {report.emerging.length} emerging · {report.accelerating.length} accelerating · {report.weakening.length} weakening
+          </span>
+          <span className="text-[10px] text-[#AAAAAA]">
+            {new Date(report.generatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
@@ -480,13 +617,21 @@ export default function DashboardPage() {
   const [decisionReviews, setDecisionReviews] = useState<DecisionReview[]>([]);
   const [allocationData, setAllocationData] = useState<AllocationAlignmentData | null>(null);
   const [allocationLoading, setAllocationLoading] = useState(true);
+  const [portValue, setPortValue] = useState<PortfolioValue | null>(null);
   const [loading, setLoading] = useState(true);
+  const [themeScout, setThemeScout] = useState<ThemeScoutReport | null>(null);
+  const [themeScoutLoading, setThemeScoutLoading] = useState(true);
 
   useEffect(() => {
     // CIO actions load independently (may be slow)
     fetch("/api/cio-actions").then(r => r.ok ? r.json() : null).then(d => {
       if (d?.actions) setCioActions(d.actions);
     }).catch(() => {}).finally(() => setCioLoading(false));
+
+    // Theme Scout loads independently
+    fetch("/api/theme-scout").then(r => r.ok ? r.json() : null).then(d => {
+      if (d?.all) setThemeScout(d as ThemeScoutReport);
+    }).catch(() => {}).finally(() => setThemeScoutLoading(false));
 
     // Allocation + theme reviews load in parallel (both feed the same card)
     Promise.all([
@@ -511,11 +656,13 @@ export default function DashboardPage() {
       fetch("/api/portfolio-architecture").then(r => r.ok ? r.json() : null).catch(() => null),
       fetch("/api/opportunities").then(r => r.ok ? r.json() : null).catch(() => null),
       fetch("/api/decision-review").then(r => r.ok ? r.json() : null).catch(() => null),
-    ]).then(([briefData, archData, oppData, decData]) => {
+      fetch("/api/portfolio-value").then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([briefData, archData, oppData, decData, pvData]) => {
       if (briefData) setBrief(briefData);
       if (archData?.review) setArchReview(archData.review);
       if (oppData?.entries) setOpportunities((oppData.entries as OpportunityEntry[]).slice(0, 5));
       if (decData?.reviews) setDecisionReviews(decData.reviews);
+      if (pvData?.totalValueThb) setPortValue(pvData as PortfolioValue);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -547,7 +694,7 @@ export default function DashboardPage() {
       {/* Row 1: Regime + Portfolio Health + Allocation Alignment */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <RegimeCard brief={brief} />
-        <PortfolioHealthCard review={archReview} />
+        <PortfolioHealthCard review={archReview} portValue={portValue} />
         <AllocationAlignmentCard data={allocationData} loading={allocationLoading} />
       </div>
 
@@ -557,8 +704,11 @@ export default function DashboardPage() {
         {alerts.length > 0 && <DecisionAlertsCard reviews={decisionReviews} />}
       </div>
 
-      {/* Row 3: Newsletter Consensus */}
-      <NewsletterConsensusCard brief={brief} />
+      {/* Row 3: Emerging Themes + Newsletter Consensus */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <EmergingThemesCard report={themeScout} loading={themeScoutLoading} />
+        <NewsletterConsensusCard brief={brief} />
+      </div>
     </div>
   );
 }

@@ -3,6 +3,7 @@
 // Rules-based only — no LLM calls.
 
 import { db } from "./db";
+import { computePortfolioValue } from "./portfolio-value-engine";
 import { generateCioActions, type CIOAction } from "./cio-actions-engine";
 import { generateThemeAllocationReview } from "./theme-allocation-engine";
 import { buildKnowledgeGraph, getCompanyGraph, computeCentrality } from "./knowledge-graph-engine";
@@ -16,7 +17,7 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type QuestionCategory = "portfolio" | "theme" | "company" | "macro";
+export type QuestionCategory = "portfolio" | "theme" | "company" | "macro" | "discovery" | "cash" | "theme_scout";
 
 export interface RelatedEntity {
   type: "company" | "theme" | "decision" | "regime";
@@ -91,6 +92,34 @@ const COMPANY_SIGNALS = [
   /risks? (for|of|in)\b/i,
 ];
 
+const CASH_SIGNALS = [
+  /how much cash/i,
+  /\bcash (balance|available|on hand|position)\b/i,
+  /buying power/i,
+  /\busd exposure\b/i,
+  /\bthb (value|total|equivalent)\b/i,
+  /portfolio (value|size|total)/i,
+  /what('?s| is) (my )?(largest|biggest) (position|holding)/i,
+  /how (big|large) is my (portfolio|total)/i,
+];
+
+const DISCOVERY_SIGNALS = [
+  /\b(discover|radar|pipeline|watch list|new idea|find me|what('?s| is) new)\b/i,
+  /\b(scouting|new opportunity|new candidate|new pick)\b/i,
+  /\bupcoming (ticker|stock|company)\b/i,
+];
+
+const THEME_SCOUT_SIGNALS = [
+  /what (themes?|sectors?) (are |is )?(emerging|accelerating|gaining|rising|weakening|falling|losing)/i,
+  /what (am i|should i be) (missing|researching|watching)/i,
+  /(which|what) theme (is|are) (gaining|losing|weakening|rising|accelerating|falling)/i,
+  /what('?s| is) gaining (momentum|strength)/i,
+  /what('?s| is) losing (momentum|steam)/i,
+  /\b(theme scout|theme momentum|theme signal)\b/i,
+  /what should i (research|investigate|look at) next/i,
+  /what (new |emerging )(theme|sector|trend)/i,
+];
+
 const MACRO_SIGNALS = [
   /\bregime\b/i,
   /risk.?off/i,
@@ -108,6 +137,15 @@ export function routeQuestion(question: string): {
   const ticker  = extractTicker(question);
   const themeId = detectTheme(question);
 
+  if (CASH_SIGNALS.some(p => p.test(question))) {
+    return { category: "cash", ticker: null, themeId: null };
+  }
+  if (THEME_SCOUT_SIGNALS.some(p => p.test(question))) {
+    return { category: "theme_scout", ticker: null, themeId: null };
+  }
+  if (DISCOVERY_SIGNALS.some(p => p.test(question))) {
+    return { category: "discovery", ticker: null, themeId: null };
+  }
   if (ticker && COMPANY_SIGNALS.some(p => p.test(question))) {
     return { category: "company", ticker, themeId: null };
   }
@@ -137,11 +175,12 @@ function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min
 // ─── Portfolio answer ─────────────────────────────────────────────────────────
 
 async function answerPortfolio(ticker: string | null): Promise<Omit<CopilotAnswer, "question" | "category">> {
-  const [cioResult, brief, archRaw] = await Promise.all([
+  const [cioResult, brief, archRaw, blueprintRaw] = await Promise.all([
     generateCioActions().catch(() => null),
     db.morningBrief.findFirst({ orderBy: { briefingDate: "desc" } }).catch(() => null),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (db as any).portfolioArchitectureReview.findFirst({ orderBy: { reviewDate: "desc" } }).catch(() => null),
+    db.portfolioBlueprint.findFirst({ orderBy: { blueprintDate: "desc" } }).catch(() => null),
   ]);
 
   const allActions = cioResult?.actions ?? [];
@@ -158,6 +197,24 @@ async function answerPortfolio(ticker: string | null): Promise<Omit<CopilotAnswe
   const hedgeAudit: HedgeAuditData | null = archRaw?.hedgeAuditDetail
     ? parseJson<HedgeAuditData | null>(archRaw.hedgeAuditDetail, null)
     : null;
+
+  // Portfolio blueprint
+  type CIOAnswers = {
+    shouldHedge: { answer: string; hedgePct: number; reason: string };
+    targetCashPct: { pct: number; reason: string };
+    targetPositionCount: { min: number; max: number; current: number };
+  };
+  type CapitalPlan = { recommendation: string; deployAmountUsd: number; deployReason: string; holdReason: string };
+  type ScenarioResult = { scenario: string; estimatedReturnRange: string; recommendation: string };
+  const blueprintCioAnswers: CIOAnswers | null = blueprintRaw?.cioAnswers
+    ? parseJson<CIOAnswers | null>(blueprintRaw.cioAnswers, null)
+    : null;
+  const blueprintCapital: CapitalPlan | null = blueprintRaw?.capitalAllocation
+    ? parseJson<CapitalPlan | null>(blueprintRaw.capitalAllocation, null)
+    : null;
+  const blueprintScenarios: ScenarioResult[] = blueprintRaw?.scenarioAnalysis
+    ? parseJson<ScenarioResult[]>(blueprintRaw.scenarioAnalysis, [])
+    : [];
 
   // Decision review for mentioned ticker
   let decisionReview: { verdict: string; thesisStatus: string; confidence: number; evidenceAgainst: string[] } | null = null;
@@ -201,11 +258,32 @@ async function answerPortfolio(ticker: string | null): Promise<Omit<CopilotAnswe
     }
   }
 
+  if (blueprintCapital) {
+    lines.push(`\nCapital Deployment`);
+    lines.push(`Recommendation: ${blueprintCapital.recommendation.replace("_", " ")} — $${(blueprintCapital.deployAmountUsd / 1000).toFixed(0)}K`);
+    lines.push(blueprintCapital.deployReason || blueprintCapital.holdReason);
+  }
+
+  if (blueprintCioAnswers) {
+    lines.push(`\nBlueprint CIO`);
+    lines.push(`Hedge: ${blueprintCioAnswers.shouldHedge.answer} (${blueprintCioAnswers.shouldHedge.hedgePct}%) — ${blueprintCioAnswers.shouldHedge.reason}`);
+    lines.push(`Cash target: ${blueprintCioAnswers.targetCashPct.pct.toFixed(1)}% — ${blueprintCioAnswers.targetCashPct.reason}`);
+    lines.push(`Positions: ${blueprintCioAnswers.targetPositionCount.current} (target ${blueprintCioAnswers.targetPositionCount.min}–${blueprintCioAnswers.targetPositionCount.max})`);
+  }
+
+  if (blueprintScenarios.length > 0) {
+    lines.push(`\nScenarios`);
+    for (const s of blueprintScenarios.slice(0, 3)) {
+      lines.push(`${s.scenario}: ${s.estimatedReturnRange} — ${s.recommendation}`);
+    }
+  }
+
   const maxConf = topActions.length > 0 ? topActions[0].confidence : 70;
 
   const sources = ["CIO Actions"];
   if (decisionReview) sources.push("Decision Review");
   if (hedgeAudit) sources.push("Portfolio Architecture");
+  if (blueprintRaw) sources.push("Portfolio Blueprint");
   if (regime) sources.push("Regime Engine");
 
   const relatedEntities: RelatedEntity[] = [];
@@ -222,6 +300,9 @@ async function answerPortfolio(ticker: string | null): Promise<Omit<CopilotAnswe
       ticker,
       decisionReview,
       hedgeAudit,
+      blueprintCapital,
+      blueprintCioAnswers,
+      blueprintScenarios: blueprintScenarios.slice(0, 3),
       topActions: topActions.slice(0, 5).map(a => ({
         category: a.category, ticker: a.ticker, title: a.title, reason: a.reason, confidence: a.confidence,
       })),
@@ -518,6 +599,229 @@ async function answerMacro(): Promise<Omit<CopilotAnswer, "question" | "category
   };
 }
 
+// ─── Cash / portfolio value answer ───────────────────────────────────────────
+
+async function answerCash(): Promise<Omit<CopilotAnswer, "question" | "category">> {
+  let snapshot: Awaited<ReturnType<typeof computePortfolioValue>> | null = null;
+  try { snapshot = await computePortfolioValue(); } catch { /* engine unavailable */ }
+
+  if (!snapshot || snapshot.totalValueThb === 0) {
+    return {
+      confidence: 50,
+      answer: "No holdings data. Add positions and cash accounts on the Portfolio page.",
+      sources: ["Portfolio Value Engine"],
+      details: {},
+      recommendedActions: [],
+      relatedEntities: [],
+    };
+  }
+
+  const fmtThb = (n: number) => "฿" + n.toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  const fmtUsd = (n: number) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+  const totalCashUsd = snapshot.cashAccounts.reduce(
+    (s, c) => s + (c.currency === "USD" ? c.balance : c.balanceThb / snapshot!.usdthb), 0
+  );
+  const totalUsdExposure = snapshot.totalUsdExposure;
+  const largest = snapshot.largestPosition;
+
+  const lines: string[] = [
+    `Total Portfolio: ${fmtThb(snapshot.totalValueThb)} (${fmtUsd(snapshot.totalValueUsd)})`,
+    `USDTHB: ${snapshot.usdthb.toFixed(2)}`,
+    `\nCash Accounts`,
+    ...snapshot.cashAccounts.map(c =>
+      `${c.accountName}: ${c.currency === "THB" ? fmtThb(c.balance) : fmtUsd(c.balance)}` +
+      (c.currency !== "THB" ? ` (${fmtThb(c.balanceThb)})` : "") +
+      (c.allocationPct != null ? ` — ${c.allocationPct.toFixed(1)}%` : "")
+    ),
+    `\nTotal Cash: ${fmtThb(snapshot.totalCashThb)}`,
+    `Total USD Exposure: ${fmtUsd(totalUsdExposure)}`,
+  ];
+
+  if (largest) {
+    lines.push(`\nLargest Position: ${largest.ticker} (${largest.allocationPct.toFixed(1)}%)`);
+  }
+
+  if (snapshot.holdings.length > 0) {
+    lines.push(`\nEquity: ${fmtUsd(snapshot.totalEquityUsd)} (${fmtThb(snapshot.totalEquityThb)})`);
+    const top3 = snapshot.holdings
+      .filter(h => h.allocationPct != null)
+      .sort((a, b) => (b.allocationPct ?? 0) - (a.allocationPct ?? 0))
+      .slice(0, 3);
+    if (top3.length > 0) {
+      lines.push("Top positions: " + top3.map(h => `${h.ticker} ${h.allocationPct!.toFixed(1)}%`).join(", "));
+    }
+  }
+
+  return {
+    confidence: 85,
+    answer: lines.join("\n"),
+    sources: ["Portfolio Value Engine"],
+    details: {
+      totalValueThb: snapshot.totalValueThb,
+      totalValueUsd: snapshot.totalValueUsd,
+      usdthb: snapshot.usdthb,
+      totalCashThb: snapshot.totalCashThb,
+      totalCashUsd: Math.round(totalCashUsd * 100) / 100,
+      totalUsdExposure,
+      largestPosition: largest,
+      cashAccounts: snapshot.cashAccounts,
+    },
+    recommendedActions: [],
+    relatedEntities: [],
+  };
+}
+
+// ─── Discovery answer ─────────────────────────────────────────────────────────
+
+async function answerDiscovery(): Promise<Omit<CopilotAnswer, "question" | "category">> {
+  const candidates = await db.discoveryCandidate.findMany({
+    where: { status: "active" },
+    orderBy: [{ score: "desc" }, { createdAt: "desc" }],
+    take: 8,
+  }).catch(() => []);
+
+  if (candidates.length === 0) {
+    return {
+      confidence: 50,
+      answer: "No discovery candidates in the radar pipeline. Run the nightly radar scan to populate.",
+      sources: ["Radar Engine"],
+      details: { candidates: [] },
+      recommendedActions: [],
+      relatedEntities: [],
+    };
+  }
+
+  const lines: string[] = [`${candidates.length} active discovery candidate${candidates.length !== 1 ? "s" : ""} in radar`];
+
+  lines.push(`\nTop Candidates`);
+  for (const c of candidates.slice(0, 5)) {
+    const score = c.score != null ? ` (${c.score.toFixed(0)}/100)` : "";
+    const reason = c.reason ? ` — ${c.reason}` : "";
+    lines.push(`${c.ticker}${score}${reason}`);
+  }
+
+  const topTicker = candidates[0];
+  if (topTicker) {
+    lines.push(`\nTop Pick: ${topTicker.ticker}`);
+    if (topTicker.catalysts) {
+      const catalysts = typeof topTicker.catalysts === "string"
+        ? parseJson<string[]>(topTicker.catalysts, [])
+        : (topTicker.catalysts as string[]);
+      if (catalysts.length > 0) lines.push(`Catalysts: ${catalysts.slice(0, 3).join(", ")}`);
+    }
+  }
+
+  const confidence = clamp(55 + Math.min(candidates.length * 4, 25), 55, 85);
+
+  return {
+    confidence,
+    answer: lines.join("\n"),
+    sources: ["Radar Engine", "Discovery Pipeline"],
+    details: {
+      count: candidates.length,
+      candidates: candidates.slice(0, 5).map(c => ({
+        ticker: c.ticker,
+        score: c.score,
+        reason: c.reason,
+      })),
+    },
+    recommendedActions: candidates.slice(0, 2).map(c => ({
+      category: "WATCH" as const,
+      ticker: c.ticker,
+      title: `Research ${c.ticker}`,
+      reason: c.reason ?? "Active radar candidate",
+      confidence: clamp(50 + Math.round((c.score ?? 50) * 0.3), 50, 85),
+    })),
+    relatedEntities: candidates.slice(0, 4).map(c => ({
+      type: "company" as const,
+      id: c.ticker,
+      label: c.ticker,
+    })),
+  };
+}
+
+// ─── Theme Scout answer ───────────────────────────────────────────────────────
+
+async function answerThemeScout(question: string): Promise<Omit<CopilotAnswer, "question" | "category">> {
+  const { getThemeScoutReport } = await import("./theme-scout-engine");
+  const report = await getThemeScoutReport();
+
+  if (!report) {
+    return {
+      confidence: 20,
+      answer: "Theme Scout has not run yet. Trigger a scan via POST /api/theme-scout or run the nightly scheduler.",
+      sources: [],
+      details: {},
+      recommendedActions: [],
+      relatedEntities: [],
+    };
+  }
+
+  const q = question.toLowerCase();
+
+  // Determine which sub-question to answer
+  const wantWeakening = /weak|falling|losing|declining/.test(q);
+  const wantMissing   = /missing|should i research|look at next/.test(q);
+  const wantGaining   = /gaining|rising|accelerating|momentum/.test(q);
+
+  let focus: typeof report.all;
+  let headline: string;
+
+  if (wantWeakening) {
+    focus = report.weakening;
+    headline = "Themes losing momentum";
+  } else if (wantGaining) {
+    focus = [...report.accelerating, ...report.emerging.filter(r => r.momentum === "Rising")];
+    headline = "Themes gaining momentum";
+  } else if (wantMissing) {
+    // Themes with high score but not currently in portfolio allocation
+    focus = [...report.emerging, ...report.accelerating].filter(r => r.isExtended);
+    headline = "Emerging themes not yet in your allocation";
+  } else {
+    // Default: emerging
+    focus = report.emerging.length > 0 ? report.emerging : report.accelerating;
+    headline = "Emerging themes";
+  }
+
+  const top5 = focus.slice(0, 5);
+
+  const themeLines = top5.map((r, i) =>
+    `${i + 1}. **${r.theme}** — Score ${r.score} · ${r.momentum} · ${r.status}\n   Signals: ${r.drivers.slice(0, 2).join("; ")}` +
+    (r.candidates.length > 0 ? `\n   Watch: ${r.candidates.map(c => c.ticker).join(", ")}` : "")
+  );
+
+  const answer = top5.length === 0
+    ? `No themes currently match "${wantWeakening ? "weakening" : wantGaining ? "gaining" : "emerging"}". Run Theme Scout to refresh data.`
+    : `**${headline}** (${new Date(report.generatedAt).toLocaleDateString()}):\n\n${themeLines.join("\n\n")}`;
+
+  return {
+    confidence: Math.min(90, 50 + top5.length * 8),
+    answer,
+    sources: ["Theme Scout", "Newsletter Intelligence", "Discovery Radar", "Opportunity Engine"],
+    details: {
+      emerging:     report.emerging.length,
+      accelerating: report.accelerating.length,
+      weakening:    report.weakening.length,
+      topThemes:    top5.map(r => ({ theme: r.theme, score: r.score, status: r.status, momentum: r.momentum })),
+    },
+    recommendedActions: top5
+      .filter(r => r.score >= 75 && r.candidates.length > 0)
+      .flatMap(r => r.candidates.slice(0, 2).map(c => ({
+        category: "WATCH" as const,
+        ticker: c.ticker,
+        title: `Research ${c.ticker} — ${r.theme}`,
+        reason: `${r.theme} scoring ${r.score}/100 (${r.momentum})`,
+        confidence: r.score,
+      }))),
+    relatedEntities: top5.map(r => ({
+      type: "theme" as const,
+      id:    r.theme.toLowerCase().replace(/\s+/g, "-"),
+      label: r.theme,
+    })),
+  };
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export async function answerQuestion(question: string): Promise<CopilotAnswer> {
@@ -534,6 +838,15 @@ export async function answerQuestion(question: string): Promise<CopilotAnswer> {
       break;
     case "company":
       partial = await answerCompany(ticker!);
+      break;
+    case "cash":
+      partial = await answerCash();
+      break;
+    case "discovery":
+      partial = await answerDiscovery();
+      break;
+    case "theme_scout":
+      partial = await answerThemeScout(question);
       break;
     case "macro":
     default:

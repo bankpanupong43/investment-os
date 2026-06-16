@@ -398,6 +398,7 @@ model PortfolioSettings {
   totalCapitalUsd Float // $39,816.22 at seed-time exchange rate
   exchangeRate    Float // 32.65 THB/USD at seed time
   source          String? // data provenance note
+  returnTargetPct Float?   // annual return target in % — drives growth allocation floor
   updatedAt       DateTime @updatedAt
 
   @@map("portfolio_settings")
@@ -903,13 +904,16 @@ model GeoEvent {
 // Source of truth for inception return calculation.
 
 model CashFlow {
-  id        String   @id @default(cuid())
-  date      DateTime
-  type      String // "deposit" | "withdrawal"
-  amountUsd Float
-  note      String?
-  source    String   @default("manual") // "manual" | "import"
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  date         DateTime
+  type         String   // "deposit" | "withdrawal"
+  amountUsd    Float    // USD equivalent (used for performance calculations)
+  amountNative Float?   // amount in native currency (null = same as amountUsd)
+  currency     String   @default("USD") // "THB" | "USD"
+  accountName  String?  // which CashAccount this affects (e.g. "Dime Save")
+  note         String?
+  source       String   @default("manual") // "manual" | "import"
+  createdAt    DateTime @default(now())
 
   @@index([date])
   @@map("cash_flows")
@@ -1041,4 +1045,67 @@ model DecisionReview {
   @@index([ticker])
   @@index([reviewDate])
   @@map("decision_reviews")
+}
+
+// ─── ThemeScout ───────────────────────────────────────────────────────────────
+// Emerging theme signal tracker — Phase 27A.
+// Refreshed nightly; one record per theme (upserted on each run).
+// Scans newsletters, institutional research, morning briefs, and radar data.
+
+model ThemeScout {
+  id           String   @id @default(cuid())
+  theme        String   @unique
+  score        Float    // 0-100 composite score (30d window + bonuses)
+  score7d      Float    @default(0) // signal intensity last 7 days (annualized, 0-100)
+  score30d     Float    @default(0) // signal intensity last 30 days (0-100)
+  score90d     Float    @default(0) // signal intensity last 90 days (0-100)
+  status       String   // emerging | accelerating | weakening | stable
+  confidence   String   // high | medium | low
+  momentum     String   // Rising | Stable | Falling
+  sources      String   @default("[]") // JSON: string[] — source names that contributed
+  mentionCount Int      @default(0)    // total article mentions in last 90 days
+  firstSeen    DateTime @default(now())
+  lastSeen     DateTime @default(now())
+  candidates   String   @default("[]") // JSON: {ticker,reason,radarScore}[] — watchlist suggestions when score>75
+  drivers      String   @default("[]") // JSON: string[] — human-readable signal drivers
+  isExtended   Boolean  @default(false) // true = new theme not in existing allocation map
+  refreshedAt  DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([score])
+  @@index([status])
+  @@map("theme_scouts")
+}
+
+// ─── PortfolioHolding ─────────────────────────────────────────────────────────
+// Source of truth for equity positions: shares × live price → market value.
+// Allocation % is derived at runtime — never stored manually.
+
+model PortfolioHolding {
+  id          String   @id @default(cuid())
+  ticker      String   @unique
+  shares      Float
+  costBasis   Float?   // average cost per share, in position currency
+  currency    String   @default("USD")
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("portfolio_holdings")
+}
+
+// ─── CashAccount ──────────────────────────────────────────────────────────────
+// Named cash buckets: Dime Save (THB), Dime USD (USD), FCD-USD (USD).
+// Balance is current amount in account currency; THB equivalent computed at runtime.
+
+model CashAccount {
+  id          String   @id @default(cuid())
+  accountName String   @unique
+  currency    String   // "THB" | "USD"
+  balance     Float    @default(0)
+  notes       String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("cash_accounts")
 }
