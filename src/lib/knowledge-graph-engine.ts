@@ -6,6 +6,7 @@
 // Pure DB queries + config — no AI calls.
 
 import { db } from "./db";
+import { getActivePortfolioPositions } from "./portfolio-value-engine";
 import {
   THEME_IDS,
   THEME_LABELS,
@@ -18,8 +19,8 @@ import { SIM_REGIMES } from "./allocation-simulator";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-export type NodeType = "COMPANY" | "THEME" | "REGIME" | "DECISION" | "NEWSLETTER" | "PORTFOLIO";
-export type RelationType = "BELONGS_TO" | "MENTIONED_IN" | "SUPPORTS" | "CONTRADICTS" | "OWNS" | "IMPACTS";
+export type NodeType = "COMPANY" | "THEME" | "REGIME" | "DECISION" | "NEWSLETTER" | "PORTFOLIO" | "SCOUT" | "PRIVATE_COMPANY";
+export type RelationType = "BELONGS_TO" | "MENTIONED_IN" | "SUPPORTS" | "CONTRADICTS" | "OWNS" | "IMPACTS" | "SCOUT_FLAGGED" | "COMP_FOR" | "BACKED_BY";
 
 export interface GraphNode {
   id: string;
@@ -115,8 +116,37 @@ export async function buildKnowledgeGraph(): Promise<KnowledgeGraph> {
 
   // ── DB queries ────────────────────────────────────────────────────────────
 
+  // ── ThemeScout nodes (Phase 27C) ─────────────────────────────────────────
+  try {
+    const scoutRows = await db.themeScout.findMany({
+      select: { theme: true, score: true, status: true, momentum: true, researchPriority: true },
+    });
+    const dossierRows = await db.themeDossier.findMany({
+      select: { theme: true, completenessScore: true },
+    }).catch(() => [] as { theme: string; completenessScore: number }[]);
+    const dossierMap = new Map(dossierRows.map(d => [d.theme, d.completenessScore]));
+
+    for (const r of scoutRows) {
+      const nodeId = `scout:${r.theme.toLowerCase().replace(/\s+/g, "-")}`;
+      addNode({
+        id:   nodeId,
+        type: "THEME",
+        name: r.theme,
+        score: r.score,
+        metadata: {
+          source:              "theme_scout",
+          status:              r.status,
+          momentum:            r.momentum,
+          researchPriority:    r.researchPriority,
+          dossierExists:       dossierMap.has(r.theme),
+          dossierCompleteness: dossierMap.get(r.theme) ?? 0,
+        },
+      });
+    }
+  } catch { /* ThemeScout/ThemeDossier tables may not exist in all environments */ }
+
   const [positions, universeItems, newsletters, decisions] = await Promise.all([
-    db.position.findMany({ where: { status: "active" } }),
+    getActivePortfolioPositions(),
     db.universe.findMany({
       where: { status: "active" },
       select: { ticker: true },
@@ -156,7 +186,7 @@ export async function buildKnowledgeGraph(): Promise<KnowledgeGraph> {
       type:     "COMPANY",
       name:     pos.ticker,
       score:    latestScores.get(pos.ticker),
-      metadata: { owned: true, allocationPct: pos.allocationPct ?? 0 },
+      metadata: { owned: true, allocationPct: pos.allocationPct },
     });
     addEdge({ source: "portfolio", target: `company:${pos.ticker}`, relation: "OWNS", strength: 90 });
   }
@@ -303,6 +333,165 @@ export async function buildKnowledgeGraph(): Promise<KnowledgeGraph> {
       });
     }
   }
+
+  // ── Company Scout metadata (Phase 28C) ───────────────────────────────────
+  try {
+    const scoutRows = await db.discoveryCandidate.findMany({
+      where:  { scoutScore: { not: null } },
+      select: { ticker: true, scoutScore: true, scoutCategory: true, companyName: true },
+      orderBy: { scoutScore: "desc" },
+      take:   20,
+    });
+
+    if (scoutRows.length > 0) {
+      addNode({ id: "scout:engine", type: "SCOUT", name: "Company Scout" });
+
+      for (const row of scoutRows) {
+        const nodeId  = `company:${row.ticker}`;
+        const existing = nodeMap.get(nodeId);
+        if (existing) {
+          nodeMap.set(nodeId, {
+            ...existing,
+            metadata: {
+              ...existing.metadata,
+              scoutScore:    row.scoutScore,
+              scoutCategory: row.scoutCategory,
+            },
+          });
+        }
+        if ((row.scoutScore ?? 0) >= 60) {
+          addEdge({
+            source:   "scout:engine",
+            target:   nodeId,
+            relation: "SCOUT_FLAGGED",
+            strength: Math.min(95, Math.round(row.scoutScore ?? 50)),
+          });
+        }
+      }
+    }
+  } catch { /* company scout data may not exist yet */ }
+
+  // ── CompanyMention intelligence (Phase 28B.2) ─────────────────────────────
+  try {
+    const d30 = new Date(Date.now() - 30 * 86_400_000);
+    const mentionRows = await db.companyMention.findMany({
+      where: { mentionDate: { gte: d30 } },
+      select: { ticker: true, sourceType: true, sentiment: true },
+    });
+
+    type MentionAgg = { count: number; sources: Set<string>; positive: number; negative: number };
+    const mentionAgg = new Map<string, MentionAgg>();
+    for (const m of mentionRows) {
+      if (!mentionAgg.has(m.ticker)) {
+        mentionAgg.set(m.ticker, { count: 0, sources: new Set(), positive: 0, negative: 0 });
+      }
+      const a = mentionAgg.get(m.ticker)!;
+      a.count++;
+      a.sources.add(m.sourceType);
+      if (m.sentiment === "positive")      a.positive++;
+      else if (m.sentiment === "negative") a.negative++;
+    }
+
+    const srcDisplayNames: Record<string, string> = {
+      newsletter:    "Newsletter Intelligence",
+      morning_brief: "Morning Brief (Mentions)",
+      institutional: "Institutional Research",
+    };
+
+    for (const [ticker, agg] of mentionAgg) {
+      const nodeId    = `company:${ticker}`;
+      const sentScore = agg.count > 0 ? Math.round((agg.positive - agg.negative) / agg.count * 100) / 100 : 0;
+
+      // Enrich existing company node with mention metadata
+      const existing = nodeMap.get(nodeId);
+      if (existing) {
+        nodeMap.set(nodeId, {
+          ...existing,
+          metadata: {
+            ...existing.metadata,
+            mentionCount30d: agg.count,
+            sourceDiversity: agg.sources.size,
+            sentimentScore:  sentScore,
+          },
+        });
+      }
+
+      for (const srcType of agg.sources) {
+        const srcId = `mention_source:${srcType}`;
+        if (!nodeMap.has(srcId)) {
+          addNode({ id: srcId, type: "NEWSLETTER", name: srcDisplayNames[srcType] ?? srcType });
+        }
+        addEdge({
+          source:   nodeId,
+          target:   srcId,
+          relation: "MENTIONED_IN",
+          strength: Math.min(95, 20 + agg.count * 8),
+        });
+      }
+    }
+  } catch { /* CompanyMention table may not exist in all environments */ }
+
+  // ── Private Company nodes (Phase 28D) ────────────────────────────────────
+  try {
+    const privateCandidates = await db.privateCandidate.findMany({
+      where:   { status: "active" },
+      orderBy: { discoveryScore: "desc" },
+      take:    30,
+    });
+
+    for (const pc of privateCandidates) {
+      const pcId = `private:${pc.companyName.toLowerCase().replace(/\s+/g, "-")}`;
+      addNode({
+        id:   pcId,
+        type: "PRIVATE_COMPANY",
+        name: pc.companyName,
+        score: pc.discoveryScore,
+        metadata: {
+          sector:          pc.sector ?? "",
+          stage:           pc.stage ?? "",
+          discoveryScore:  pc.discoveryScore,
+          noveltyScore:    pc.noveltyScore,
+          estimatedRevenue: pc.estimatedRevenue ?? "",
+        },
+      });
+
+      // COMP_FOR edges: private → public beneficiary
+      type BeneficiaryEntry = { ticker: string; rationale: string; confidence: number };
+      const beneficiaries: BeneficiaryEntry[] = (() => {
+        try { return JSON.parse(pc.publicBeneficiaries) as BeneficiaryEntry[]; } catch { return []; }
+      })();
+      for (const b of beneficiaries) {
+        const pubId = `company:${b.ticker}`;
+        if (!nodeMap.has(pubId)) {
+          addNode({ id: pubId, type: "COMPANY", name: b.ticker, metadata: { owned: false, allocationPct: 0 } });
+        }
+        addEdge({ source: pcId, target: pubId, relation: "COMP_FOR", strength: b.confidence });
+      }
+
+      // BACKED_BY edges: private → backer names
+      const backers: string[] = (() => {
+        try { return JSON.parse(pc.backers) as string[]; } catch { return []; }
+      })();
+      for (const backer of backers.slice(0, 3)) {
+        const backerId = `backer:${backer.toLowerCase().replace(/\s+/g, "-")}`;
+        if (!nodeMap.has(backerId)) {
+          addNode({ id: backerId, type: "NEWSLETTER", name: backer, metadata: { isBacker: true } });
+        }
+        addEdge({ source: pcId, target: backerId, relation: "BACKED_BY", strength: 70 });
+      }
+
+      // BELONGS_TO theme edges
+      const themes: string[] = (() => {
+        try { return JSON.parse(pc.themeLinks) as string[]; } catch { return []; }
+      })();
+      for (const themeName of themes) {
+        const scoutId = `scout:${themeName.toLowerCase().replace(/\s+/g, "-")}`;
+        if (nodeMap.has(scoutId)) {
+          addEdge({ source: pcId, target: scoutId, relation: "BELONGS_TO", strength: 75 });
+        }
+      }
+    }
+  } catch { /* PrivateCandidate table may not exist in all environments */ }
 
   return {
     nodes: Array.from(nodeMap.values()),

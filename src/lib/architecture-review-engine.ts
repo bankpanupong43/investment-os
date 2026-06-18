@@ -14,6 +14,7 @@
 import fs from "fs";
 import path from "path";
 import { db } from "./db";
+import { getActivePortfolioPositions } from "./portfolio-value-engine";
 import { resolveBrainOsPath } from "./shared-paths";
 import {
   type HedgeEfficiencyResult,
@@ -416,42 +417,23 @@ interface ArchPos {
 // ─── Portfolio data loader ────────────────────────────────────────────────────
 
 async function loadPositions(): Promise<ArchPos[]> {
-  const positions = await db.position.findMany({
-    where: { status: "active" },
-    select: { ticker: true, name: true, sector: true, allocationPct: true, currentValueUsd: true },
-  });
+  const activePositions = await getActivePortfolioPositions();
 
-  // Resolve allocation % — prefer allocationPct, fallback to currentValueUsd
-  let resolved = positions.map(p => ({ ...p, pct: p.allocationPct ?? 0 }));
-  const totalPct = resolved.reduce((s, p) => s + p.pct, 0);
-
-  if (totalPct > 20) {
-    const factor = 100 / totalPct;
-    resolved = resolved.map(p => ({ ...p, pct: p.pct * factor }));
-  } else {
-    // Fall back to currentValueUsd
-    const totalUsd = positions.reduce((s, p) => s + (p.currentValueUsd ?? 0), 0);
-    if (totalUsd > 0) {
-      resolved = positions.map(p => ({ ...p, pct: ((p.currentValueUsd ?? 0) / totalUsd) * 100 }));
-    }
-  }
-
-  // Enrich with universe data
-  const tickers = resolved.map(p => p.ticker).filter(t => t !== "CASH");
+  const tickers = activePositions.map(p => p.ticker).filter(t => t !== "CASH");
   const universeRows = await db.universe.findMany({
     where: { ticker: { in: tickers } },
     select: { ticker: true, marketCap: true, country: true },
   });
   const uniMap = new Map(universeRows.map(u => [u.ticker, u]));
 
-  return resolved.map(p => {
+  return activePositions.map(p => {
     const u = uniMap.get(p.ticker);
     return {
       ticker: p.ticker,
       name: p.name,
       sector: p.sector,
-      pct: Math.round(p.pct * 100) / 100,
-      valueUsd: p.currentValueUsd ?? 0,
+      pct: Math.round(p.allocationPct * 100) / 100,
+      valueUsd: p.marketValueUsd,
       marketCapUsd: u?.marketCap ?? null,
       country: u?.country ?? (INTL_TICKERS.has(p.ticker) ? "Non-US" : "US"),
       isHedge: ALL_HEDGE_TICKERS.has(p.ticker),

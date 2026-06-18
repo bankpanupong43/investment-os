@@ -640,7 +640,8 @@ export default function OpportunitiesPage() {
     [entriesWithFeedback, activeTab]
   );
 
-  const fmtUsd = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+  const fmtUsd = (n: number | null | undefined) =>
+    n == null || !isFinite(n) ? "—" : `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 
   if (loading) {
     return (

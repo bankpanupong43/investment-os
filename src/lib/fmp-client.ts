@@ -224,6 +224,86 @@ export async function fetchCompanyProfile(ticker: string, apiKey: string): Promi
   }
 }
 
+// ─── Insider Activity ─────────────────────────────────────────────────────────
+
+export interface FMPInsiderTrade {
+  symbol:               string;
+  transactionDate:      string | null;  // YYYY-MM-DD
+  transactionType:      string | null;  // P-Purchase | S-Sale | A-Award | M-Exempt | etc.
+  securitiesTransacted: number | null;
+  price:                number | null;
+  officerTitle:         string | null;
+  reportingName:        string | null;
+  acquistedDisposed:    string | null;  // "A" = acquired, "D" = disposed
+}
+
+export async function fetchInsiderActivity(
+  ticker: string,
+  apiKey: string,
+  limit = 25,
+): Promise<FMPInsiderTrade[]> {
+  try {
+    return await stableGet<FMPInsiderTrade>("insider-trading", ticker, apiKey, `&limit=${limit}`);
+  } catch {
+    return [];
+  }
+}
+
+// ─── Stock Screener ───────────────────────────────────────────────────────────
+
+export interface FMPScreenerResult {
+  symbol:      string;
+  companyName: string;
+  marketCap:   number | null;   // absolute USD
+  sector:      string | null;
+  industry:    string | null;
+  country:     string | null;
+  exchange:    string | null;
+  beta:        number | null;
+}
+
+export interface ScreenerOptions {
+  marketCapMoreThan?: number;   // absolute USD (e.g. 1_000_000_000 for $1B)
+  marketCapLessThan?: number;
+  sector?:            string;
+  country?:           string;
+  exchange?:          string;
+  limit?:             number;
+  isEtf?:             boolean;
+  isFund?:            boolean;
+  excludeSectors?:    string[]; // client-side filter
+}
+
+export async function fetchScreener(
+  apiKey: string,
+  opts: ScreenerOptions = {},
+): Promise<FMPScreenerResult[]> {
+  const params = new URLSearchParams({ apikey: apiKey });
+  if (opts.marketCapMoreThan) params.set("marketCapMoreThan", String(opts.marketCapMoreThan));
+  if (opts.marketCapLessThan) params.set("marketCapLessThan", String(opts.marketCapLessThan));
+  if (opts.sector)   params.set("sector",   opts.sector);
+  if (opts.country)  params.set("country",  opts.country);
+  if (opts.exchange) params.set("exchange", opts.exchange);
+  if (opts.limit)    params.set("limit",    String(opts.limit));
+  if (opts.isEtf  !== undefined) params.set("isEtf",  String(opts.isEtf));
+  if (opts.isFund !== undefined) params.set("isFund", String(opts.isFund));
+
+  try {
+    const url = `${STABLE}/company-screener?${params.toString()}`;
+    const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(15000) });
+    if (!res.ok) return [];
+    const body: unknown = await res.json();
+    if (!Array.isArray(body)) return [];
+    const results = body as FMPScreenerResult[];
+    if (opts.excludeSectors?.length) {
+      return results.filter(r => !opts.excludeSectors!.includes(r.sector ?? ""));
+    }
+    return results;
+  } catch {
+    return [];
+  }
+}
+
 // ─── Ticker search ────────────────────────────────────────────────────────────
 
 export interface FMPSearchResult {

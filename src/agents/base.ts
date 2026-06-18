@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { withHeadroom } from "headroom-ai/anthropic";
 import { DEFAULT_MODEL, MAX_AGENT_ITERATIONS } from "@/lib/constants";
 
 export interface AgentTool {
@@ -26,7 +27,12 @@ export class BaseAgent {
   protected config: AgentConfig;
 
   constructor(config: AgentConfig) {
-    this.client = new Anthropic();
+    const raw = new Anthropic();
+    this.client = withHeadroom(raw, {
+      fallback: true,
+      ...(process.env.HEADROOM_BASE_URL && { baseUrl: process.env.HEADROOM_BASE_URL }),
+      ...(process.env.HEADROOM_API_KEY  && { apiKey:  process.env.HEADROOM_API_KEY  }),
+    }) as Anthropic;
     this.config = config;
   }
 

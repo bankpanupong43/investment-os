@@ -79,6 +79,23 @@ export interface BusinessOverview {
   businessModel: string;
 }
 
+export interface ScenarioCase {
+  label: "Bull" | "Base" | "Bear";
+  probability: number;     // 0–100, all three sum to 100
+  returnPct: number;       // expected % price change (e.g. +35, +10, -15)
+  thesis: string;
+  keyDriver: string;
+}
+
+export interface ScenarioAnalysis {
+  bull: ScenarioCase;
+  base: ScenarioCase;
+  bear: ScenarioCase;
+  impliedReturn: number;   // probability-weighted expected return
+  convictionLevel: "High" | "Medium" | "Low";
+  positionSizing: string;  // e.g. "3–5% given moderate risk/reward"
+}
+
 export interface ResearchDossierData {
   ticker: string;
   companyName: string;
@@ -99,6 +116,7 @@ export interface ResearchDossierData {
     maxPct: number;
     maxUsd: number;
   };
+  scenarioAnalysis: ScenarioAnalysis;
   // Evidence layer (Phase 5D.5)
   facts: FactItem[];
   interpretation: InterpretationItem[];
@@ -247,6 +265,89 @@ function getBusinessModel(grossMargin: number | null, assetType: string, sector:
     return "Balanced product and services business — " + Math.round(grossMargin) + "% gross margins reflect competitive positioning with growth levers in higher-margin service mix.";
   }
   return "Volume-driven model — competitive pricing balanced with operational scale efficiency and cost discipline.";
+}
+
+// ─── Scenario analysis ─────────────────────────────────────────────────────────
+
+export function computeScenarioAnalysis(
+  companyScore: number,
+  brainAlignmentScore: number,
+  whyBuy: WhyBuyReason[],
+  risks: RiskSections,
+  thesisDraft: ThesisDraft,
+  suggestedAllocation: ResearchDossierData["suggestedAllocation"],
+  isEtf = false,
+): ScenarioAnalysis {
+  // ── Probability allocation ─────────────────────────────────────────────────
+  let bullP = 25, baseP = 55, bearP = 20;
+
+  if (companyScore >= 75) { bullP += 10; bearP -= 10; }
+  else if (companyScore < 55) { bullP -= 5; bearP += 5; }
+
+  if (thesisDraft.confidence >= 8) { bullP += 5; bearP -= 5; }
+  else if (thesisDraft.confidence <= 5) { bullP -= 5; bearP += 5; }
+
+  // Clamp to valid range
+  bullP = Math.max(10, Math.min(50, bullP));
+  bearP = Math.max(10, Math.min(45, bearP));
+  baseP = 100 - bullP - bearP;
+
+  // ── Return targets ─────────────────────────────────────────────────────────
+  let bullRet: number, baseRet: number, bearRet: number;
+
+  if (isEtf) {
+    bullRet = 18; baseRet = 10; bearRet = -12;
+  } else if (companyScore >= 75) {
+    bullRet = 42; baseRet = 16; bearRet = -12;
+  } else if (companyScore >= 60) {
+    bullRet = 28; baseRet = 10; bearRet = -18;
+  } else {
+    bullRet = 18; baseRet = 5;  bearRet = -25;
+  }
+
+  // Adjust for high-conviction top reasons
+  const hasGrowthDriver = whyBuy.some(r => r.strength === "strong");
+  if (hasGrowthDriver && !isEtf) { bullRet += 5; baseRet += 3; }
+
+  // Penalise if high-severity financial risks present
+  const highFinRisk = risks.financialRisks.some(r => r.severity === "high");
+  if (highFinRisk) { bullRet -= 5; baseRet -= 3; bearRet -= 5; }
+
+  // ── Thesis text ────────────────────────────────────────────────────────────
+  const bullDriver  = whyBuy[0]?.reason ?? "Business quality and earnings compounding";
+  const bullThesis  = `All key drivers execute — ${bullDriver.toLowerCase()}. Multiple expansion on improved fundamentals.`;
+
+  const baseThesis  = "Core thesis holds with steady execution. No major surprises; valuation re-rates modestly with earnings growth.";
+  const baseDriver  = "Company delivers on guidance; macro environment remains constructive.";
+
+  const bearDriver  = risks.businessRisks[0]?.risk ?? "Competitive or macro deterioration";
+  const bearThesis  = `Primary risk materialises — ${bearDriver.slice(0, 100)}${bearDriver.length > 100 ? "…" : ""}. Multiple compression compounds fundamental weakness.`;
+
+  // ── Conviction & position sizing ───────────────────────────────────────────
+  const convictionLevel: ScenarioAnalysis["convictionLevel"] =
+    companyScore >= 75 && brainAlignmentScore >= 70 ? "High" :
+    companyScore < 55 ? "Low" : "Medium";
+
+  const volatilityLabel =
+    companyScore >= 75 ? "lower volatility" :
+    companyScore >= 60 ? "moderate volatility" : "higher volatility";
+
+  const positionSizing =
+    `${suggestedAllocation.starterPct.toFixed(1)}–${suggestedAllocation.targetPct.toFixed(1)}% given ${volatilityLabel} profile`;
+
+  // ── Implied return ─────────────────────────────────────────────────────────
+  const impliedReturn = Math.round(
+    (bullP / 100) * bullRet + (baseP / 100) * baseRet + (bearP / 100) * bearRet,
+  );
+
+  return {
+    bull: { label: "Bull", probability: bullP, returnPct: bullRet, thesis: bullThesis, keyDriver: bullDriver },
+    base: { label: "Base", probability: baseP, returnPct: baseRet, thesis: baseThesis, keyDriver: baseDriver },
+    bear: { label: "Bear", probability: bearP, returnPct: bearRet, thesis: bearThesis, keyDriver: bearDriver },
+    impliedReturn,
+    convictionLevel,
+    positionSizing,
+  };
 }
 
 // ─── Section generators ────────────────────────────────────────────────────────
@@ -655,6 +756,16 @@ export async function generateDossier(ticker: string, apiKey: string): Promise<R
   const recommendation = generateRecommendation(facts, interpretation, entry);
   const evidenceSummary = buildEvidenceSummary(facts, interpretation, entry);
 
+  const scenarioAnalysis = computeScenarioAnalysis(
+    entry.companyScore,
+    investmentSummary.brainAlignmentScore,
+    whyBuy,
+    risks,
+    thesisDraft,
+    entry.suggestedAllocation,
+    entry.assetType === "etf",
+  );
+
   return {
     ticker: entry.ticker,
     companyName: entry.companyName,
@@ -668,6 +779,7 @@ export async function generateDossier(ticker: string, apiKey: string): Promise<R
     portfolioFit,
     thesisDraft,
     suggestedAllocation: entry.suggestedAllocation,
+    scenarioAnalysis,
     facts,
     interpretation,
     recommendation,
@@ -808,6 +920,16 @@ export async function generateDossierOnDemand(ticker: string, apiKey: string): P
   const recommendation = generateRecommendation(facts, interpretation, entry);
   const evidenceSummary = buildEvidenceSummary(facts, interpretation, entry);
 
+  const scenarioAnalysis = computeScenarioAnalysis(
+    entry.companyScore,
+    investmentSummary.brainAlignmentScore,
+    whyBuy,
+    risks,
+    thesisDraft,
+    suggestedAllocation,
+    false,
+  );
+
   return {
     ticker: t,
     companyName: entry.companyName,
@@ -821,6 +943,7 @@ export async function generateDossierOnDemand(ticker: string, apiKey: string): P
     portfolioFit,
     thesisDraft,
     suggestedAllocation,
+    scenarioAnalysis,
     facts,
     interpretation,
     recommendation,
@@ -920,19 +1043,36 @@ export function parseDossierRow(row: {
   facts?: string; interpretation?: string; recommendation?: string; evidenceSummary?: string;
   generatedAt: Date; isOnDemand?: boolean; premiumDataUnavailable?: boolean;
 }): ResearchDossierData {
+  const investmentSummary: InvestmentSummary = JSON.parse(row.investmentSummary);
+  const whyBuy: WhyBuyReason[]               = JSON.parse(row.whyBuy);
+  const risks: RiskSections                  = JSON.parse(row.risks);
+  const thesisDraft: ThesisDraft             = JSON.parse(row.thesisDraft);
+  const suggestedAllocation                  = JSON.parse(row.suggestedAllocation);
+
+  const scenarioAnalysis = computeScenarioAnalysis(
+    row.companyScore,
+    investmentSummary.brainAlignmentScore ?? 0,
+    whyBuy,
+    risks,
+    thesisDraft,
+    suggestedAllocation,
+    investmentSummary.universeTier === "tier4",
+  );
+
   return {
     ticker: row.ticker,
     companyName: row.companyName,
     generatedAt: row.generatedAt.toISOString(),
     opportunityScore: row.opportunityScore,
     companyScore: row.companyScore,
-    investmentSummary: JSON.parse(row.investmentSummary),
+    investmentSummary,
     businessOverview: JSON.parse(row.businessOverview),
-    whyBuy: JSON.parse(row.whyBuy),
-    risks: JSON.parse(row.risks),
+    whyBuy,
+    risks,
     portfolioFit: JSON.parse(row.portfolioFit),
-    thesisDraft: JSON.parse(row.thesisDraft),
-    suggestedAllocation: JSON.parse(row.suggestedAllocation),
+    thesisDraft,
+    suggestedAllocation,
+    scenarioAnalysis,
     facts: JSON.parse(row.facts ?? "[]"),
     interpretation: JSON.parse(row.interpretation ?? "[]"),
     recommendation: JSON.parse(row.recommendation ?? "{}"),

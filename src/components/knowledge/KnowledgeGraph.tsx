@@ -58,12 +58,14 @@ interface NodeData {
 // ─── Colors & config ──────────────────────────────────────────────────────────
 
 const TYPE_COLORS: Record<NodeType, string> = {
-  COMPANY:    "#3E6AE1",
-  THEME:      "#15803D",
-  REGIME:     "#C2410C",
-  NEWSLETTER: "#7C3AED",
-  DECISION:   "#6B7280",
-  PORTFOLIO:  "#1D4ED8",
+  COMPANY:         "#3E6AE1",
+  THEME:           "#15803D",
+  REGIME:          "#C2410C",
+  NEWSLETTER:      "#7C3AED",
+  DECISION:        "#6B7280",
+  PORTFOLIO:       "#1D4ED8",
+  SCOUT:           "#D97706",
+  PRIVATE_COMPANY: "#9333EA",
 };
 
 const VERDICT_BORDER: Record<string, string> = {
@@ -73,10 +75,11 @@ const VERDICT_BORDER: Record<string, string> = {
   Exit:       "#DC2626",
 };
 
-const FILTER_TYPES: NodeType[] = ["COMPANY", "THEME", "REGIME", "NEWSLETTER", "DECISION"];
+const FILTER_TYPES: NodeType[] = ["COMPANY", "THEME", "REGIME", "NEWSLETTER", "DECISION", "PRIVATE_COMPANY"];
 const FILTER_LABELS: Record<NodeType, string> = {
   COMPANY: "Companies", THEME: "Themes", REGIME: "Regimes",
-  NEWSLETTER: "Newsletters", DECISION: "Decisions", PORTFOLIO: "Portfolio",
+  NEWSLETTER: "Newsletters", DECISION: "Decisions", PORTFOLIO: "Portfolio", SCOUT: "Scout",
+  PRIVATE_COMPANY: "Private",
 };
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
@@ -665,7 +668,7 @@ function KnowledgeGraphInner({ focusNode }: KnowledgeGraphInnerProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<NodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [filters, setFilters]     = useState<Record<NodeType, boolean>>({
-    COMPANY: true, THEME: true, REGIME: true, NEWSLETTER: true, DECISION: true, PORTFOLIO: false,
+    COMPANY: true, THEME: true, REGIME: true, NEWSLETTER: true, DECISION: true, PORTFOLIO: false, SCOUT: false, PRIVATE_COMPANY: true,
   });
   const [search, setSearch]           = useState("");
   const [selectedNode, setSelectedNode] = useState<FullGraphNode | null>(null);

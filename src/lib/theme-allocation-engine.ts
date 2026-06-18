@@ -2,8 +2,9 @@
 // Answers: Which themes should receive capital? Why? Which stocks implement those views?
 
 import { db } from "./db";
+import { getActivePortfolioPositions } from "./portfolio-value-engine";
 import { computeOpportunities } from "./opportunity-engine";
-import { REGIME_SCENARIO_NAMES } from "./allocation-engine";
+import { REGIME_SCENARIO_NAMES, DRIFT_BAND } from "./allocation-engine";
 import {
   THEME_IDS, THEME_LABELS, TICKER_THEME_MAP,
   THEME_BASE_TARGETS, THEME_REGIME_ADJUSTMENTS, THEME_KEYWORDS,
@@ -173,7 +174,7 @@ export async function generateThemeAllocationReview(
 
   // ── Load data ───────────────────────────────────────────────────
   const [positions, brief, newsletterItems] = await Promise.all([
-    db.position.findMany({ where: { status: "active" } }),
+    getActivePortfolioPositions(),
     db.morningBrief.findFirst({ orderBy: { briefingDate: "desc" } }),
     db.newsletterItem.findMany({
       where: { publishedAt: { gte: fourteenDaysAgo } },
@@ -217,15 +218,13 @@ export async function generateThemeAllocationReview(
   const scenario = REGIME_SCENARIO_NAMES[regime] ?? "Balanced";
 
   // ── Current theme allocation ─────────────────────────────────────
-  const totalValue = positions.reduce((s, p) => s + (p.currentValueUsd ?? 0), 0);
   const themeCurrent = new Map<ThemeId, { pct: number; tickers: string[] }>();
   for (const id of THEME_IDS) themeCurrent.set(id, { pct: 0, tickers: [] });
 
   for (const pos of positions) {
     const tid = tickerTheme(pos.ticker);
-    const pct = pos.allocationPct ?? (totalValue > 0 ? ((pos.currentValueUsd ?? 0) / totalValue) * 100 : 0);
     const entry = themeCurrent.get(tid)!;
-    entry.pct += pct;
+    entry.pct += pos.allocationPct;
     entry.tickers.push(pos.ticker);
   }
 
@@ -317,7 +316,7 @@ export async function generateThemeAllocationReview(
       currentPct,
       targetPct,
       gapPct,
-      direction: (gapPct > 1 ? "underweight" : gapPct < -1 ? "overweight" : "balanced") as ThemeGap["direction"],
+      direction: (gapPct > DRIFT_BAND ? "underweight" : gapPct < -DRIFT_BAND ? "overweight" : "balanced") as ThemeGap["direction"],
       tickers: themeCurrent.get(id)?.tickers ?? [],
     };
   }).filter(g => g.currentPct > 0 || g.targetPct > 0);

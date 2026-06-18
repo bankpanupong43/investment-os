@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { computePortfolioValue } from "@/lib/portfolio-value-engine";
 
 export interface AllocationEntry {
   ticker: string;
@@ -11,7 +12,7 @@ export interface AllocationEntry {
   targetThb: number;
   targetPct: number;
   currentUsd: number;
-  currentPct: number;   // current value as % of totalCapitalUsd
+  currentPct: number;   // current value as % of live portfolio total
   gapUsd: number;       // positive = under-allocated (need to buy)
   gapPct: number;       // gapUsd as % of targetUsd (0–100)
   pctFunded: number;    // currentUsd / targetUsd * 100
@@ -25,8 +26,27 @@ export interface UntrackedPosition {
   name: string;
   sector: string | null;
   assetClass: string;
+  bucket: string;
   currentUsd: number;
   currentPct: number;
+}
+
+function inferBucket(assetClass: string, sector: string | null): string {
+  const ac = (assetClass ?? "").toLowerCase();
+  if (ac === "cash") return "defensive";
+  if (ac.includes("bond") || ac.includes("fixed")) return "defensive";
+  if (ac.includes("commodity")) return "value";
+  const s = (sector ?? "").toLowerCase();
+  if (s.includes("technolog") || s.includes("semiconduct") || s.includes("software")) return "growth";
+  if (s.includes("communication") || s.includes("media") || s.includes("internet")) return "growth";
+  if (s.includes("consumer discret") || s.includes("retail") || s.includes("e-commerce")) return "growth";
+  if (s.includes("health") || s.includes("pharma") || s.includes("biotech")) return "defensive";
+  if (s.includes("consumer stapl") || s.includes("utilit") || s.includes("real estate")) return "defensive";
+  if (s.includes("financ") || s.includes("bank") || s.includes("insurance")) return "core";
+  if (s.includes("industri") || s.includes("aerospace") || s.includes("defense")) return "core";
+  if (s.includes("material") || s.includes("mining") || s.includes("energy")) return "value";
+  if (s.includes("small") || s.includes("mid")) return "small";
+  return "growth";
 }
 
 export interface AllocationResponse {
@@ -39,8 +59,8 @@ export interface AllocationResponse {
   };
   summary: {
     totalTargetUsd: number;
-    totalDeployedUsd: number;  // sum of current values for targeted positions
-    totalUntrackedUsd: number; // sum of current values for untracked positions
+    totalDeployedUsd: number;
+    totalUntrackedUsd: number;
     cashUsd: number;
     totalGapUsd: number;
     pctFunded: number;
@@ -53,38 +73,33 @@ export interface AllocationResponse {
 }
 
 export async function GET(): Promise<NextResponse> {
-  const [settings, allocationTargets, positions] = await Promise.all([
-    db.portfolioSettings.findFirst(),
+  const [allocationTargets, snapshot, posMeta] = await Promise.all([
     db.allocationTarget.findMany({ orderBy: { priority: "asc" } }),
+    computePortfolioValue(),
     db.position.findMany({
       where: { status: "active" },
-      select: {
-        id: true,
-        ticker: true,
-        name: true,
-        sector: true,
-        assetClass: true,
-        currentValueUsd: true,
-        snapshotDate: true,
-      },
+      select: { id: true, ticker: true, name: true, sector: true, assetClass: true },
     }),
   ]);
 
-  if (!settings) {
-    return NextResponse.json({ error: "Portfolio settings not found. Run db:seed-targets." }, { status: 404 });
-  }
+  const usdthb       = snapshot.usdthb ?? 35;
+  const totalLiveUsd = snapshot.totalValueThb / usdthb;
+  const cashUsd      = snapshot.totalCashThb / usdthb;
 
-  const posMap = new Map(positions.map(p => [p.ticker, p]));
+  // Live market value per ticker from PortfolioHolding
+  const holdingMap = new Map(snapshot.holdings.map(h => [h.ticker, h.marketValueUsd ?? 0]));
+
+  // Position metadata for names, sectors, IDs
+  const posMap      = new Map(posMeta.map(p => [p.ticker, p]));
   const targetTickers = new Set(allocationTargets.map(t => t.ticker));
 
-  // Build allocation entries
   const targets: AllocationEntry[] = allocationTargets.map(t => {
     const pos        = posMap.get(t.ticker);
-    const currentUsd = pos?.currentValueUsd ?? 0;
+    const currentUsd = holdingMap.get(t.ticker) ?? 0;
     const gapUsd     = t.targetUsd - currentUsd;
     const pctFunded  = t.targetUsd > 0 ? (currentUsd / t.targetUsd) * 100 : 0;
     const gapPct     = t.targetUsd > 0 ? (gapUsd / t.targetUsd) * 100 : 0;
-    const currentPct = settings.totalCapitalUsd > 0 ? (currentUsd / settings.totalCapitalUsd) * 100 : 0;
+    const currentPct = totalLiveUsd > 0 ? (currentUsd / totalLiveUsd) * 100 : 0;
 
     return {
       ticker:       t.ticker,
@@ -101,47 +116,42 @@ export async function GET(): Promise<NextResponse> {
       gapPct,
       pctFunded,
       positionId:   pos?.id ?? null,
-      snapshotDate: pos?.snapshotDate?.toISOString() ?? null,
+      snapshotDate: snapshot.priceDate,
     };
   });
 
-  // Untracked positions (held but not in target allocation, excluding CASH)
-  const untracked: UntrackedPosition[] = positions
-    .filter(p => !targetTickers.has(p.ticker) && p.ticker !== "CASH")
-    .map(p => ({
-      positionId:   p.id,
-      ticker:       p.ticker,
-      name:         p.name,
-      sector:       p.sector,
-      assetClass:   p.assetClass,
-      currentUsd:   p.currentValueUsd ?? 0,
-      currentPct:   settings.totalCapitalUsd > 0 ? ((p.currentValueUsd ?? 0) / settings.totalCapitalUsd) * 100 : 0,
-    }));
+  // Untracked: in PortfolioHolding but not in AllocationTarget
+  const untracked: UntrackedPosition[] = snapshot.holdings
+    .filter(h => !targetTickers.has(h.ticker))
+    .map(h => {
+      const pos = posMap.get(h.ticker);
+      return {
+        positionId: pos?.id ?? h.ticker,
+        ticker:     h.ticker,
+        name:       pos?.name ?? h.ticker,
+        sector:     pos?.sector ?? null,
+        assetClass: pos?.assetClass ?? "equity",
+        bucket:     inferBucket(pos?.assetClass ?? "equity", pos?.sector ?? null),
+        currentUsd: h.marketValueUsd ?? 0,
+        currentPct: h.allocationPct ?? 0,
+      };
+    });
 
-  // Summary
   const totalTargetUsd    = targets.reduce((s, t) => s + t.targetUsd, 0);
   const totalDeployedUsd  = targets.reduce((s, t) => s + t.currentUsd, 0);
   const totalUntrackedUsd = untracked.reduce((s, u) => s + u.currentUsd, 0);
-  const cashPos           = posMap.get("CASH");
-  const cashUsd           = cashPos?.currentValueUsd ?? 0;
   const totalGapUsd       = totalTargetUsd - totalDeployedUsd;
   const pctFunded         = totalTargetUsd > 0 ? (totalDeployedUsd / totalTargetUsd) * 100 : 0;
   const canFullyFund      = cashUsd >= totalGapUsd;
   const shortfallUsd      = Math.max(0, totalGapUsd - cashUsd);
 
-  const latestSnapshot = positions
-    .map(p => p.snapshotDate)
-    .filter(Boolean)
-    .sort()
-    .at(-1);
-
   const response: AllocationResponse = {
     settings: {
-      label:           settings.label,
-      totalCapitalUsd: settings.totalCapitalUsd,
-      totalCapitalThb: settings.totalCapitalThb,
-      exchangeRate:    settings.exchangeRate,
-      source:          settings.source,
+      label:           "Live Portfolio",
+      totalCapitalUsd: totalLiveUsd,
+      totalCapitalThb: snapshot.totalValueThb,
+      exchangeRate:    usdthb,
+      source:          snapshot.priceDate ? `Live · ${snapshot.priceDate}` : "Live Prices",
     },
     summary: {
       totalTargetUsd,
@@ -152,7 +162,7 @@ export async function GET(): Promise<NextResponse> {
       pctFunded,
       canFullyFund,
       shortfallUsd,
-      snapshotDate: latestSnapshot?.toISOString() ?? null,
+      snapshotDate: snapshot.priceDate,
     },
     targets,
     untracked,

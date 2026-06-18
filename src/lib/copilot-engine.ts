@@ -17,7 +17,7 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type QuestionCategory = "portfolio" | "theme" | "company" | "macro" | "discovery" | "cash" | "theme_scout";
+export type QuestionCategory = "portfolio" | "theme" | "company" | "macro" | "discovery" | "cash" | "theme_scout" | "theme_dossier" | "catalyst" | "mention_intel" | "company_scout" | "private_scout" | "macro_ripple";
 
 export interface RelatedEntity {
   type: "company" | "theme" | "decision" | "regime";
@@ -115,9 +115,75 @@ const THEME_SCOUT_SIGNALS = [
   /(which|what) theme (is|are) (gaining|losing|weakening|rising|accelerating|falling)/i,
   /what('?s| is) gaining (momentum|strength)/i,
   /what('?s| is) losing (momentum|steam)/i,
-  /\b(theme scout|theme momentum|theme signal)\b/i,
-  /what should i (research|investigate|look at) next/i,
+  /\b(theme scout|theme momentum|theme signal|research queue)\b/i,
+  /what should i (research|investigate|look at) (next|this week)/i,
   /what (new |emerging )(theme|sector|trend)/i,
+  /under.?owned (theme|sector)/i,
+  /themes? (outside|beyond|not in) (my )?(portfolio|allocation)/i,
+  /\b(research priority|novelty score|high novelty)\b/i,
+  /what (themes?|sectors?) (have i|am i) (not|missing|ignoring|overlooking)/i,
+];
+
+const DOSSIER_SIGNALS = [
+  /^(tell me about|teach me|explain|why is|what is|give me a dossier on|research)\s+(.+)$/i,
+  /(dossier|deep.?dive|overview|analysis) (on|of|for)\s+(.+)/i,
+  /what should i know about\s+(.+)/i,
+  /investment (case|thesis) (for|on)\s+(.+)/i,
+];
+
+const CATALYST_SIGNALS = [
+  /\b(upcoming|next)\s+(earnings|report|quarter)\b/i,
+  /what (earnings|reports?) (are )?(coming|scheduled|due)/i,
+  /\b(earnings calendar|catalyst calendar|event calendar)\b/i,
+  /when (is|are|does)\s+\w+ (reporting|earnings|report)/i,
+  /\b(catalyst|catalysts)\b/i,
+];
+
+const COMPANY_SCOUT_SIGNALS = [
+  /what companies should i (research|look at|investigate|consider)/i,
+  /what (hidden gems?|new companies|emerging companies|new names?) (are|is) (emerging|showing up|appearing)/i,
+  /what (is |are )?(company scout|scout) (seeing|finding|surfacing)/i,
+  /any (companies|stocks) (outside|beyond) (my )?portfolio (gaining|with) momentum/i,
+  /what new (opportunities?|companies?|stocks?) (are )?(appearing|emerging|showing)/i,
+  /\b(company scout|scout report|scout candidates?)\b/i,
+  /companies (i am|i'm|am i) not (paying attention|tracking|watching)/i,
+  /what (am i|should i be) missing (in terms of |regarding )?(companies?|stocks?)/i,
+];
+
+const MENTION_INTEL_SIGNALS = [
+  /what (companies|stocks) (are |is )?(getting|receiving|attracting) (attention|mentions|coverage)/i,
+  /what (stocks|companies) (are )?rising in (mentions|attention|coverage)/i,
+  /what (are )?(institutions|institutional) (talking|discussing) about/i,
+  /\b(cross.?source|multi.?source)\s+(consensus|coverage|attention)\b/i,
+  /what('?s| is) (the )?most (discussed|mentioned|talked.about)/i,
+  /\b(mention|mentions)\s+(intelligence|trends?|momentum|stats?)\b/i,
+  /who (is|are) (being )?(talked about|mentioned|discussed) (most|lately|recently)/i,
+  /\b(attention flow|company attention|mention radar)\b/i,
+];
+
+const PRIVATE_SCOUT_SIGNALS = [
+  /what (private|private-market|pre.?ipo) (companies?|startups?|unicorns?)/i,
+  /what startups? should i (watch|track|follow|research|consider)/i,
+  /which (private companies?|startups?) (matter|are important|are shaping)/i,
+  /what public (stocks?|companies?) benefit from (anthropic|openai|cursor|databricks|anduril|spacex|xai|figure)/i,
+  /what public (stocks?|companies?) benefit from (ai|private (market|companies?))/i,
+  /if i (can('?t)?|cannot) buy (anthropic|openai|cursor|xai|spacex|anduril|databricks)/i,
+  /\b(private scout|private market|pre.?ipo|unicorn|startup radar)\b/i,
+  /what startups? are gaining (momentum|traction|attention)/i,
+  /private (market )?(exposure|opportunities?|beneficiar)/i,
+  /what companies? are shaping the future before (they become|going) public/i,
+  /\b(comp.?for|public beneficiar|private.+public)\b/i,
+];
+
+const MACRO_RIPPLE_SIGNALS = [
+  /what (happens?|would happen|will happen) to (my portfolio|my holdings|portfolio|my positions?) if/i,
+  /\b(ripple|ripple effect|ripple analysis|ripple impact)\b/i,
+  /\b(scenario analysis|stress test|portfolio impact scenario)\b/i,
+  /if (the )?(fed|federal reserve) (hikes?|cuts?|raises?|lowers?)/i,
+  /if (there is |we have |we enter )?(a |an )?(recession|crash|stagflation|soft landing)/i,
+  /\b(macro ripple|macro shock|macro scenario|portfolio scenario|impact scenario)\b/i,
+  /how (does|would|will) (a )?(rate hike|rate cut|recession|inflation spike|oil surge|vix spike) (impact|affect|hit) (my portfolio|portfolio|my holdings)/i,
+  /what (is|would be) the (portfolio )?(impact|effect) (of|if)/i,
 ];
 
 const MACRO_SIGNALS = [
@@ -140,6 +206,18 @@ export function routeQuestion(question: string): {
   if (CASH_SIGNALS.some(p => p.test(question))) {
     return { category: "cash", ticker: null, themeId: null };
   }
+  if (COMPANY_SCOUT_SIGNALS.some(p => p.test(question))) {
+    return { category: "company_scout", ticker: null, themeId: null };
+  }
+  if (MENTION_INTEL_SIGNALS.some(p => p.test(question))) {
+    return { category: "mention_intel", ticker: null, themeId: null };
+  }
+  if (CATALYST_SIGNALS.some(p => p.test(question))) {
+    return { category: "catalyst", ticker: null, themeId: null };
+  }
+  if (DOSSIER_SIGNALS.some(p => p.test(question))) {
+    return { category: "theme_dossier", ticker: null, themeId: null };
+  }
   if (THEME_SCOUT_SIGNALS.some(p => p.test(question))) {
     return { category: "theme_scout", ticker: null, themeId: null };
   }
@@ -151,6 +229,12 @@ export function routeQuestion(question: string): {
   }
   if (PORTFOLIO_SIGNALS.some(p => p.test(question))) {
     return { category: "portfolio", ticker, themeId: null };
+  }
+  if (PRIVATE_SCOUT_SIGNALS.some(p => p.test(question))) {
+    return { category: "private_scout", ticker: null, themeId: null };
+  }
+  if (MACRO_RIPPLE_SIGNALS.some(p => p.test(question))) {
+    return { category: "macro_ripple", ticker: null, themeId: null };
   }
   if (MACRO_SIGNALS.some(p => p.test(question))) {
     return { category: "macro", ticker: null, themeId: null };
@@ -677,7 +761,7 @@ async function answerCash(): Promise<Omit<CopilotAnswer, "question" | "category"
 async function answerDiscovery(): Promise<Omit<CopilotAnswer, "question" | "category">> {
   const candidates = await db.discoveryCandidate.findMany({
     where: { status: "active" },
-    orderBy: [{ score: "desc" }, { createdAt: "desc" }],
+    orderBy: [{ radarScore: "desc" }, { createdAt: "desc" }],
     take: 8,
   }).catch(() => []);
 
@@ -696,20 +780,16 @@ async function answerDiscovery(): Promise<Omit<CopilotAnswer, "question" | "cate
 
   lines.push(`\nTop Candidates`);
   for (const c of candidates.slice(0, 5)) {
-    const score = c.score != null ? ` (${c.score.toFixed(0)}/100)` : "";
-    const reason = c.reason ? ` — ${c.reason}` : "";
+    const score = c.radarScore != null ? ` (${c.radarScore.toFixed(0)}/100)` : "";
+    const reason = c.discoveryReason ? ` — ${c.discoveryReason}` : "";
     lines.push(`${c.ticker}${score}${reason}`);
   }
 
   const topTicker = candidates[0];
   if (topTicker) {
     lines.push(`\nTop Pick: ${topTicker.ticker}`);
-    if (topTicker.catalysts) {
-      const catalysts = typeof topTicker.catalysts === "string"
-        ? parseJson<string[]>(topTicker.catalysts, [])
-        : (topTicker.catalysts as string[]);
-      if (catalysts.length > 0) lines.push(`Catalysts: ${catalysts.slice(0, 3).join(", ")}`);
-    }
+    const topSignals = parseJson<string[]>(topTicker.signals, []);
+    if (topSignals.length > 0) lines.push(`Signals: ${topSignals.slice(0, 3).join(", ")}`);
   }
 
   const confidence = clamp(55 + Math.min(candidates.length * 4, 25), 55, 85);
@@ -722,16 +802,16 @@ async function answerDiscovery(): Promise<Omit<CopilotAnswer, "question" | "cate
       count: candidates.length,
       candidates: candidates.slice(0, 5).map(c => ({
         ticker: c.ticker,
-        score: c.score,
-        reason: c.reason,
+        score: c.radarScore,
+        reason: c.discoveryReason,
       })),
     },
     recommendedActions: candidates.slice(0, 2).map(c => ({
       category: "WATCH" as const,
       ticker: c.ticker,
       title: `Research ${c.ticker}`,
-      reason: c.reason ?? "Active radar candidate",
-      confidence: clamp(50 + Math.round((c.score ?? 50) * 0.3), 50, 85),
+      reason: c.discoveryReason ?? "Active radar candidate",
+      confidence: clamp(50 + Math.round((c.radarScore ?? 50) * 0.3), 50, 85),
     })),
     relatedEntities: candidates.slice(0, 4).map(c => ({
       type: "company" as const,
@@ -760,10 +840,61 @@ async function answerThemeScout(question: string): Promise<Omit<CopilotAnswer, "
 
   const q = question.toLowerCase();
 
-  // Determine which sub-question to answer
-  const wantWeakening = /weak|falling|losing|declining/.test(q);
-  const wantMissing   = /missing|should i research|look at next/.test(q);
-  const wantGaining   = /gaining|rising|accelerating|momentum/.test(q);
+  const wantWeakening  = /weak|falling|losing|declining/.test(q);
+  const wantMissing    = /missing|should i research|look at next|research (this|next) week/.test(q);
+  const wantGaining    = /gaining|rising|accelerating|momentum/.test(q);
+  const wantUnderOwned = /under.?owned|outside (my )?(portfolio|allocation)|not in (my )?(portfolio|allocation)/.test(q);
+
+  // For missing/under-owned queries, augment with research queue data
+  if (wantMissing || wantUnderOwned) {
+    const { generateResearchQueue } = await import("./research-queue-engine");
+    const queue = await generateResearchQueue();
+
+    const targets = wantUnderOwned
+      ? queue.underOwnedThemes
+      : queue.topResearchTargets;
+
+    const top5 = targets.slice(0, 5);
+    const headline = wantUnderOwned
+      ? "Themes under-owned relative to signal strength"
+      : "Research Queue — highest priority this week";
+
+    const themeLines = top5.map((r, i) =>
+      `${i + 1}. **${r.theme}** — Priority ${r.researchPriority}/100 · Novelty ${r.noveltyScore}/100 · ${r.momentum}\n   ${r.whyNow}` +
+      (r.candidates.length > 0 ? `\n   Companies: ${r.candidates.map(c => c.ticker).join(", ")}` : "")
+    );
+
+    const answer = top5.length === 0
+      ? "Research queue is empty — run the Theme Scout to generate priorities."
+      : `**${headline}** (${new Date(queue.generatedAt).toLocaleDateString()}):\n\n${themeLines.join("\n\n")}\n\n` +
+        `${queue.themesNeedingResearch} themes flagged for research across all signals.`;
+
+    return {
+      confidence: Math.min(88, 55 + top5.length * 7),
+      answer,
+      sources: ["Research Queue", "Theme Scout", "Portfolio", "Newsletter Intelligence"],
+      details: {
+        themesNeedingResearch: queue.themesNeedingResearch,
+        highNovelty:           queue.highNoveltyThemes.length,
+        underOwned:            queue.underOwnedThemes.length,
+        topTargets:            top5.map(r => ({ theme: r.theme, priority: r.researchPriority, novelty: r.noveltyScore })),
+      },
+      recommendedActions: top5
+        .filter(r => r.candidates.length > 0)
+        .flatMap(r => r.candidates.slice(0, 2).map(c => ({
+          category: "WATCH" as const,
+          ticker: c.ticker,
+          title: `Research ${c.ticker} — ${r.theme}`,
+          reason: r.whyNow,
+          confidence: r.researchPriority,
+        }))),
+      relatedEntities: top5.map(r => ({
+        type: "theme" as const,
+        id:    r.theme.toLowerCase().replace(/\s+/g, "-"),
+        label: r.theme,
+      })),
+    };
+  }
 
   let focus: typeof report.all;
   let headline: string;
@@ -774,12 +905,7 @@ async function answerThemeScout(question: string): Promise<Omit<CopilotAnswer, "
   } else if (wantGaining) {
     focus = [...report.accelerating, ...report.emerging.filter(r => r.momentum === "Rising")];
     headline = "Themes gaining momentum";
-  } else if (wantMissing) {
-    // Themes with high score but not currently in portfolio allocation
-    focus = [...report.emerging, ...report.accelerating].filter(r => r.isExtended);
-    headline = "Emerging themes not yet in your allocation";
   } else {
-    // Default: emerging
     focus = report.emerging.length > 0 ? report.emerging : report.accelerating;
     headline = "Emerging themes";
   }
@@ -822,6 +948,538 @@ async function answerThemeScout(question: string): Promise<Omit<CopilotAnswer, "
   };
 }
 
+// ─── Theme Dossier answer ─────────────────────────────────────────────────────
+
+const SCOUT_THEME_NAMES = [
+  "AI Infrastructure", "AI Agents", "Semiconductors", "Defense", "Defense AI",
+  "Healthcare & GLP-1", "Nuclear Energy", "Space Economy", "Cybersecurity",
+  "Power Grid", "Robotics", "Digital Payments", "Data Centers", "Energy",
+];
+
+function extractThemeFromQuestion(q: string): string | null {
+  const lower = q.toLowerCase();
+  // Exact match first
+  for (const t of SCOUT_THEME_NAMES) {
+    if (lower.includes(t.toLowerCase())) return t;
+  }
+  // Fuzzy keyword match
+  const keywords: Record<string, string> = {
+    "ai agent": "AI Agents", "agentic": "AI Agents",
+    "nuclear": "Nuclear Energy", "uranium": "Nuclear Energy", "smr": "Nuclear Energy",
+    "space": "Space Economy", "satellite": "Space Economy", "rocket": "Space Economy",
+    "robot": "Robotics", "humanoid": "Robotics", "automation": "Robotics",
+    "cyber": "Cybersecurity", "zero trust": "Cybersecurity",
+    "power grid": "Power Grid", "grid": "Power Grid",
+    "payment": "Digital Payments", "fintech": "Digital Payments",
+    "data center": "Data Centers", "colocation": "Data Centers",
+    "defense ai": "Defense AI", "military ai": "Defense AI",
+    "semiconductor": "Semiconductors", "chip": "Semiconductors",
+    "glp-1": "Healthcare & GLP-1", "obesity": "Healthcare & GLP-1",
+  };
+  for (const [kw, theme] of Object.entries(keywords)) {
+    if (lower.includes(kw)) return theme;
+  }
+  return null;
+}
+
+async function answerThemeDossier(question: string): Promise<Omit<CopilotAnswer, "question" | "category">> {
+  const theme = extractThemeFromQuestion(question);
+
+  if (!theme) {
+    return {
+      confidence: 20,
+      answer: "I couldn't identify a specific theme in your question. Try: \"Tell me about AI Agents\" or \"Teach me Nuclear Energy\".",
+      sources: [],
+      details: {},
+      recommendedActions: [],
+      relatedEntities: [],
+    };
+  }
+
+  const { getThemeDossier, generateThemeDossier, saveThemeDossier } = await import("./research-dossier-engine");
+
+  let dossier = await getThemeDossier(theme);
+  if (!dossier) {
+    dossier = await generateThemeDossier(theme);
+    await saveThemeDossier(dossier);
+  }
+
+  const d = dossier;
+  const momentum = d.marketOverview.momentum;
+  const arrowMap: Record<string, string> = { Rising: "↑", Stable: "→", Falling: "↓" };
+
+  const answer = [
+    `## ${d.theme} ${arrowMap[momentum] ?? "→"}`,
+    "",
+    `**${d.executiveSummary.whatIsThis}**`,
+    "",
+    `**Why Now:** ${d.executiveSummary.whyNow}`,
+    "",
+    `**Why It Matters:** ${d.executiveSummary.whyItMatters}`,
+    "",
+    d.keyDrivers.length > 0
+      ? `**Key Drivers:**\n${d.keyDrivers.slice(0, 4).map(dr => `- ${dr}`).join("\n")}`
+      : "",
+    "",
+    d.publicExposure.length > 0
+      ? `**Key Names:** ${d.publicExposure.filter(e => e.category === "pure_play").map(e => e.ticker).slice(0, 5).join(", ") || d.publicExposure.slice(0, 5).map(e => e.ticker).join(", ")}`
+      : "",
+    "",
+    `**Bull Case:** ${d.scenarios.bull.split(";")[0]}`,
+    "",
+    `**Portfolio Gap:** Current ${d.portfolioRelevance.currentExposurePct.toFixed(1)}% → Target ${d.portfolioRelevance.recommendedExposurePct.toFixed(1)}% (${d.portfolioRelevance.gap > 0 ? "+" : ""}${d.portfolioRelevance.gap.toFixed(1)}%)`,
+    "",
+    d.privateExposure.length > 0
+      ? `**Private Market:** ${d.privateExposure.map(p => p.company).slice(0, 3).join(", ")}`
+      : "",
+  ].filter(line => line !== "").join("\n");
+
+  return {
+    confidence: Math.min(90, 40 + d.completenessScore * 0.5),
+    answer,
+    sources: d.evidenceSources,
+    details: {
+      theme:             d.theme,
+      completenessScore: d.completenessScore,
+      maturity:          d.marketOverview.maturity,
+      momentum:          d.marketOverview.momentum,
+      portfolioGap:      d.portfolioRelevance.gap,
+      dossierUrl:        `/research-dossier/${encodeURIComponent(d.theme)}`,
+    },
+    recommendedActions: [
+      ...d.publicExposure
+        .filter(e => e.category === "pure_play" && !e.inPortfolio)
+        .slice(0, 2)
+        .map(e => ({
+          category: "WATCH" as const,
+          ticker: e.ticker,
+          title: `Research ${e.ticker} — ${d.theme} pure play`,
+          reason: `${d.theme}: Target ${d.portfolioRelevance.recommendedExposurePct}% vs current ${d.portfolioRelevance.currentExposurePct.toFixed(1)}%`,
+          confidence: Math.round(d.marketOverview.themeScore),
+        })),
+    ],
+    relatedEntities: [
+      { type: "theme" as const, id: d.theme.toLowerCase().replace(/\s+/g, "-"), label: d.theme },
+    ],
+  };
+}
+
+// ─── Catalyst answer ──────────────────────────────────────────────────────────
+
+async function answerCatalyst(): Promise<Omit<CopilotAnswer, "question" | "category">> {
+  const { getCatalystCalendar } = await import("./catalyst-engine");
+  const events = await getCatalystCalendar(90).catch(() => []);
+
+  const upcoming = events.filter(e => e.daysAway >= -7);
+  if (upcoming.length === 0) {
+    return {
+      confidence: 50,
+      answer: "No upcoming catalyst events found. Add earnings history via the Catalyst page to populate the calendar.",
+      sources: ["Catalyst Engine"],
+      details: { events: [] },
+      recommendedActions: [],
+      relatedEntities: [],
+    };
+  }
+
+  const lines: string[] = [`${upcoming.length} catalyst event${upcoming.length !== 1 ? "s" : ""} in the next 90 days`];
+  lines.push("\nUpcoming Earnings");
+  for (const e of upcoming.slice(0, 6)) {
+    const dayLabel = e.daysAway === 0 ? "today"
+      : e.daysAway === 1 ? "tomorrow"
+      : e.daysAway < 0 ? `${Math.abs(e.daysAway)}d ago`
+      : `in ${e.daysAway}d`;
+    lines.push(`${e.ticker} — ${e.title} (${dayLabel}, Impact: ${e.impactRating}${e.isEstimated ? ", est." : ""})`);
+  }
+
+  const highImpact = upcoming.filter(e => e.impactRating === "H" && e.daysAway >= 0);
+  if (highImpact.length > 0) {
+    lines.push(`\nHigh-impact events: ${highImpact.map(e => e.ticker).join(", ")}`);
+  }
+
+  return {
+    confidence: 75,
+    answer: lines.join("\n"),
+    sources: ["Catalyst Engine", "Earnings Database"],
+    details: { count: upcoming.length, events: upcoming.slice(0, 6) },
+    recommendedActions: highImpact.slice(0, 2).map(e => ({
+      category: "WATCH" as const,
+      ticker: e.ticker,
+      title: `Monitor ${e.ticker} earnings`,
+      reason: `${e.title} — high impact position`,
+      confidence: 70,
+    })),
+    relatedEntities: upcoming.slice(0, 4).map(e => ({
+      type: "company" as const,
+      id: e.ticker,
+      label: e.ticker,
+    })),
+  };
+}
+
+// ─── Company Scout answer ────────────────────────────────────────────────────
+
+async function answerCompanyScout(): Promise<Omit<CopilotAnswer, "question" | "category">> {
+  const { scanCompanies, rankCompanies } = await import("./company-scout-engine");
+  const candidates = await scanCompanies().catch(() => []);
+  const ranked     = rankCompanies(candidates);
+
+  if (ranked.length === 0) {
+    return {
+      confidence: 35,
+      answer: "Company Scout has no data yet. Run the ticker extraction and discovery intelligence jobs first, then trigger a scout run via POST /api/company-scout.",
+      sources: ["Company Scout"],
+      details: {},
+      recommendedActions: [],
+      relatedEntities: [],
+    };
+  }
+
+  const topNew     = ranked.filter(c => !c.isOwned && !c.inWatchlist).slice(0, 6);
+  const hiddenGems = ranked.filter(c => c.scoutCategory === "Hidden Gem").slice(0, 3);
+  const emerging   = ranked.filter(c => c.scoutCategory === "Emerging").slice(0, 3);
+  const consensus  = ranked.filter(c => c.scoutCategory === "Consensus").slice(0, 3);
+
+  const ownedCount = ranked.filter(c => c.isOwned).length;
+  const newCount   = ranked.filter(c => !c.isOwned && !c.inWatchlist).length;
+
+  const lines: string[] = [
+    `Scout Coverage: ${ranked.length} companies tracked — ${newCount} outside portfolio`,
+  ];
+
+  if (topNew.length > 0) {
+    lines.push("\nTop New Opportunities (not in portfolio)");
+    for (const c of topNew.slice(0, 5)) {
+      const trend = c.trend === "Rising" ? "↑" : c.trend === "Falling" ? "↓" : "→";
+      lines.push(`${c.ticker} — Scout ${c.scoutScore}/100 ${trend} | ${c.mentionCount30d} mentions, ${c.sourceDiversity} source${c.sourceDiversity !== 1 ? "s" : ""} | ${c.scoutCategory}`);
+    }
+  }
+
+  if (hiddenGems.length > 0) {
+    lines.push("\nHidden Gems");
+    for (const c of hiddenGems) {
+      lines.push(`${c.ticker} — ${c.scoutScore}/100 | quality attention before mass coverage`);
+    }
+  }
+
+  if (emerging.length > 0) {
+    lines.push("\nEmerging");
+    for (const c of emerging) {
+      lines.push(`${c.ticker} — ${c.scoutScore}/100 | new discovery, score ${c.discoveryScore}`);
+    }
+  }
+
+  if (consensus.length > 0) {
+    lines.push("\nCross-Source Consensus");
+    for (const c of consensus) {
+      lines.push(`${c.ticker} — ${c.scoutScore}/100 | ${c.sourceDiversity} source types agree`);
+    }
+  }
+
+  const confidence = clamp(55 + newCount * 3, 55, 85);
+  const actionCandidates = topNew.filter(c => c.scoutScore >= 55).slice(0, 2);
+
+  return {
+    confidence,
+    answer: lines.join("\n"),
+    sources: ["Company Scout", "Discovery Intelligence", "Ticker Extraction"],
+    details: {
+      totalTracked: ranked.length,
+      ownedCount,
+      newCount,
+      topNew:     topNew.slice(0, 5).map(c => ({ ticker: c.ticker, scoutScore: c.scoutScore, category: c.scoutCategory, trend: c.trend })),
+      hiddenGems: hiddenGems.map(c => ({ ticker: c.ticker, scoutScore: c.scoutScore })),
+    },
+    recommendedActions: actionCandidates.map(c => ({
+      category: "WATCH" as const,
+      ticker:   c.ticker,
+      title:    `Research ${c.ticker} — ${c.scoutCategory}`,
+      reason:   `Scout score ${c.scoutScore}/100 | ${c.mentionCount30d} mentions across ${c.sourceDiversity} source type${c.sourceDiversity !== 1 ? "s" : ""}`,
+      confidence: clamp(c.scoutScore, 50, 80),
+    })),
+    relatedEntities: topNew.slice(0, 4).map(c => ({
+      type:  "company" as const,
+      id:    c.ticker,
+      label: c.ticker,
+    })),
+  };
+}
+
+// ─── Mention Intelligence answer ─────────────────────────────────────────────
+
+async function answerMentionIntel(): Promise<Omit<CopilotAnswer, "question" | "category">> {
+  const { getDiscoveryLeaderboard } = await import("./discovery-intelligence-engine");
+  const board = await getDiscoveryLeaderboard().catch(() => null);
+
+  if (!board || board.signals.length === 0) {
+    return {
+      confidence: 35,
+      answer: "No mention intelligence yet. Run the Ticker Extraction job to build the database, then run Discovery Intelligence to score candidates.",
+      sources: ["Ticker Extraction"],
+      details: {},
+      recommendedActions: [],
+      relatedEntities: [],
+    };
+  }
+
+  const top         = board.signals.slice(0, 8);
+  const rising      = board.signals.filter(s => s.trend === "Rising").slice(0, 3);
+  const crossSource = board.signals.filter(s => s.sourceDiversity >= 2).slice(0, 3);
+
+  const lines: string[] = [
+    `${board.totalTickers} companies tracked | ${board.signals.reduce((acc, s) => acc + s.mentionCount30d, 0)} total mentions (30d)`,
+  ];
+
+  lines.push("\nTop by Discovery Score");
+  for (const s of top.slice(0, 5)) {
+    const trend = s.trend === "Rising" ? "↑" : s.trend === "Falling" ? "↓" : "→";
+    lines.push(`${s.ticker} — ${s.discoveryScore}/100 ${trend} (${s.mentionCount30d} mentions, ${s.sourceDiversity} source${s.sourceDiversity !== 1 ? "s" : ""})`);
+  }
+
+  if (rising.length > 0) {
+    lines.push("\nFastest Rising");
+    for (const s of rising) {
+      lines.push(`${s.ticker} — ${s.mentionCount7d} in 7d vs ${s.mentionCount30d} in 30d`);
+    }
+  }
+
+  if (crossSource.length > 0) {
+    lines.push("\nCross-Source Consensus");
+    for (const s of crossSource) {
+      lines.push(`${s.ticker} — ${s.sourceDiversity} source types: ${Object.keys(s.sourceBreakdown).join(", ")}`);
+    }
+  }
+
+  const confidence = clamp(55 + board.signals.length * 2, 55, 85);
+
+  return {
+    confidence,
+    answer: lines.join("\n"),
+    sources: ["Ticker Extraction", "Discovery Intelligence"],
+    details: {
+      totalTickers:      board.totalTickers,
+      risingCount:       board.risingCount,
+      crossSourceCount:  board.crossSourceCount,
+      autoPromotedCount: board.autoPromotedCount,
+      leaderboard: top.slice(0, 5).map(s => ({
+        ticker:         s.ticker,
+        discoveryScore: s.discoveryScore,
+        trend:          s.trend,
+        mentions30d:    s.mentionCount30d,
+      })),
+    },
+    recommendedActions: top
+      .filter(s => !s.isOwned && s.discoveryScore >= 60)
+      .slice(0, 2)
+      .map(s => ({
+        category: "WATCH" as const,
+        ticker:   s.ticker,
+        title:    `Research ${s.ticker}`,
+        reason:   `${s.trend} mention momentum — ${s.sourceDiversity} source type${s.sourceDiversity !== 1 ? "s" : ""}`,
+        confidence: clamp(s.discoveryScore, 50, 80),
+      })),
+    relatedEntities: top.slice(0, 4).map(s => ({
+      type:  "company" as const,
+      id:    s.ticker,
+      label: s.ticker,
+    })),
+  };
+}
+
+// ─── Private Scout answer ─────────────────────────────────────────────────────
+
+async function answerPrivateScout(question: string): Promise<Omit<CopilotAnswer, "question" | "category">> {
+  const { getPrivateScoutReport } = await import("./private-scout-engine");
+  const report = await getPrivateScoutReport();
+
+  if (!report) {
+    return {
+      confidence: 30,
+      answer: "Private Scout has not run yet. Trigger a scan via POST /api/private-scout or run the nightly scheduler.",
+      sources: [],
+      details: {},
+      recommendedActions: [],
+      relatedEntities: [],
+    };
+  }
+
+  const q = question.toLowerCase();
+  const wantBeneficiaries = /benefit|public (stocks?|companies?)|if i (can|cannot)|comp.?for/i.test(q);
+
+  // Try to extract a specific private company name from the question
+  const mentionedCompany = report.topCandidates.find(c =>
+    q.includes(c.companyName.toLowerCase())
+  );
+
+  const lines: string[] = [];
+
+  if (mentionedCompany) {
+    // Specific company query
+    lines.push(`## ${mentionedCompany.companyName}`);
+    lines.push(`Sector: ${mentionedCompany.sector} · Stage: ${mentionedCompany.stage} · Score: ${mentionedCompany.discoveryScore}/100`);
+    if (mentionedCompany.estimatedRevenue) lines.push(`Revenue: ${mentionedCompany.estimatedRevenue}`);
+    if (mentionedCompany.backers.length > 0) lines.push(`Backers: ${mentionedCompany.backers.slice(0, 4).join(", ")}`);
+    if (mentionedCompany.themeLinks.length > 0) lines.push(`Themes: ${mentionedCompany.themeLinks.join(", ")}`);
+
+    if (mentionedCompany.publicBeneficiaries.length > 0) {
+      lines.push(`\n**Public Market Beneficiaries (COMP_FOR)**`);
+      for (const b of mentionedCompany.publicBeneficiaries) {
+        lines.push(`• **${b.ticker}** (${b.confidence}%) — ${b.rationale}`);
+      }
+    }
+  } else if (wantBeneficiaries) {
+    // Public beneficiary focus
+    lines.push(`**Top Public Market Beneficiaries from Private Company Activity**\n`);
+    for (const b of report.topPublicBeneficiaries.slice(0, 8)) {
+      lines.push(`**${b.ticker}** — exposed to ${b.linkedCompanies.slice(0, 3).join(", ")} (${b.exposureCount} private link${b.exposureCount !== 1 ? "s" : ""})`);
+    }
+    lines.push(`\n*You cannot buy these private companies directly, but these public stocks benefit from their growth.*`);
+  } else {
+    // General private market overview
+    lines.push(`**${report.totalScanned} private companies tracked · Private Market Scout**\n`);
+    lines.push(`**Top Private Companies Shaping the Future**\n`);
+    for (const c of report.topCandidates.slice(0, 6)) {
+      const publicSide = c.publicBeneficiaries.slice(0, 2).map(b => b.ticker).join(", ");
+      lines.push(`**${c.companyName}** — Score ${c.discoveryScore}/100 | ${c.sector} | ${c.stage}` +
+        (publicSide ? ` → **${publicSide}**` : "")
+      );
+    }
+
+    if (report.topPublicBeneficiaries.length > 0) {
+      lines.push(`\n**If you cannot buy them, buy these:**`);
+      for (const b of report.topPublicBeneficiaries.slice(0, 5)) {
+        lines.push(`${b.ticker} — ${b.exposureCount} private link${b.exposureCount !== 1 ? "s" : ""} (${b.linkedCompanies.slice(0, 2).join(", ")})`);
+      }
+    }
+  }
+
+  const confidence = clamp(55 + report.totalScanned * 2, 60, 85);
+
+  const top3 = report.topCandidates.slice(0, 3);
+  const topBeneficiaryTickers = report.topPublicBeneficiaries.slice(0, 3).map(b => b.ticker);
+
+  return {
+    confidence,
+    answer: lines.join("\n"),
+    sources: ["Private Scout", "Hacker News", "VC Blogs", "Theme Scout"],
+    details: {
+      totalScanned:     report.totalScanned,
+      topCandidates:    top3.map(c => ({ company: c.companyName, score: c.discoveryScore, sector: c.sector })),
+      topBeneficiaries: report.topPublicBeneficiaries.slice(0, 5),
+      mentionedCompany: mentionedCompany?.companyName ?? null,
+    },
+    recommendedActions: topBeneficiaryTickers.map(ticker => ({
+      category: "WATCH" as const,
+      ticker,
+      title: `Research ${ticker} — Private Market Exposure`,
+      reason: `${ticker} benefits from ${report.topPublicBeneficiaries.find(b => b.ticker === ticker)?.linkedCompanies.slice(0, 2).join(", ") ?? "private company activity"}`,
+      confidence: clamp(60 + report.topCandidates[0]?.discoveryScore * 0.2, 55, 82),
+    })),
+    relatedEntities: [
+      ...top3.map(c => ({ type: "company" as const, id: c.companyName, label: c.companyName })),
+      ...topBeneficiaryTickers.map(t => ({ type: "company" as const, id: t, label: t })),
+    ],
+  };
+}
+
+// ─── Macro Ripple answer ─────────────────────────────────────────────────────
+
+async function answerMacroRipple(question: string): Promise<Omit<CopilotAnswer, "question" | "category">> {
+  const { runRippleAnalysis } = await import("./ripple-engine");
+
+  const q = question.toLowerCase();
+
+  const SCENARIO_KEYWORDS: Record<string, string[]> = {
+    fed_hike_50:             ["fed hike", "rate hike", "hikes", "raises rates", "tightening"],
+    fed_cut_50:              ["fed cut", "rate cut", "cuts rates", "lowers rates", "easing", "dovish"],
+    recession_confirmed:     ["recession", "gdp negative", "contraction", "crash"],
+    inflation_resurgence:    ["inflation", "cpi", "price spike", "inflationary", "resurge"],
+    ai_acceleration:         ["ai breakthrough", "ai acceleration", "gpt", "ai wave", "ai leap"],
+    china_taiwan_escalation: ["china", "taiwan", "escalation", "conflict"],
+    oil_surge_30pct:         ["oil surge", "oil spike", "crude", "oil price"],
+    vix_spike_30:            ["vix", "market panic", "volatility spike", "panic"],
+    soft_landing:            ["soft landing", "goldilocks", "no recession", "disinflation"],
+    stagflation:             ["stagflation", "slow growth inflation", "stagnation"],
+    tech_regulation_shock:   ["antitrust", "big tech regulation", "tech ruling"],
+    nato_defense_surge:      ["nato", "defense spending", "military spending", "defense budget"],
+  };
+
+  let matchedId = "fed_hike_50";
+  let bestScore = 0;
+  for (const [id, keywords] of Object.entries(SCENARIO_KEYWORDS)) {
+    const score = keywords.filter(kw => q.includes(kw)).length;
+    if (score > bestScore) { bestScore = score; matchedId = id; }
+  }
+
+  const analysis = await runRippleAnalysis(matchedId);
+  if (!analysis) {
+    return {
+      confidence: 40,
+      answer: "Macro Ripple Analyzer could not run. Ensure portfolio holdings are set up.",
+      sources: ["Macro Ripple Engine"],
+      details: {},
+      recommendedActions: [],
+      relatedEntities: [],
+    };
+  }
+
+  const lines: string[] = [
+    `**Macro Ripple: ${analysis.scenario.name}**`,
+    analysis.scenario.description,
+    `\nRegime: **${analysis.regime.name}** (${analysis.regime.strength}% strength)`,
+    analysis.regime.description,
+  ];
+
+  if (analysis.themeRipples.length > 0) {
+    lines.push(`\n**Theme Impact**`);
+    for (const t of analysis.themeRipples.slice(0, 6)) {
+      const arrow = t.direction === "positive" ? "↑" : t.direction === "negative" ? "↓" : "→";
+      lines.push(`${arrow} ${t.themeName}: ${t.totalImpact > 0 ? "+" : ""}${t.totalImpact}`);
+    }
+  }
+
+  const { topWinners, topLosers, verdict, pctPortfolioPositive, pctPortfolioNegative, weightedImpactScore } = analysis.summary;
+  if (topWinners.length > 0) {
+    lines.push(`\n**Portfolio Winners:** ${topWinners.map(h => `${h.ticker} (+${h.impactScore})`).join(", ")}`);
+  }
+  if (topLosers.length > 0) {
+    lines.push(`**Portfolio Losers:** ${topLosers.map(h => `${h.ticker} (${h.impactScore})`).join(", ")}`);
+  }
+  lines.push(`\n**Summary:** ${verdict}`);
+  lines.push(`${pctPortfolioPositive}% helped · ${pctPortfolioNegative}% hurt · Score: ${weightedImpactScore >= 0 ? "+" : ""}${weightedImpactScore}`);
+  if (analysis.scenario.historicalPrecedent) {
+    lines.push(`\n*Historical reference: ${analysis.scenario.historicalPrecedent}*`);
+  }
+
+  return {
+    confidence: 72,
+    answer: lines.join("\n"),
+    sources: ["Macro Ripple Engine", "Theme Regime Model", "Portfolio Holdings"],
+    details: {
+      scenarioId:          analysis.scenario.id,
+      scenarioName:        analysis.scenario.name,
+      regime:              analysis.regime.name,
+      regimeStrength:      analysis.regime.strength,
+      weightedImpactScore,
+      themeRipples:        analysis.themeRipples.slice(0, 6),
+      topWinners,
+      topLosers,
+    },
+    recommendedActions: topLosers.slice(0, 2).map(h => ({
+      category:   "WATCH" as const,
+      ticker:     h.ticker,
+      title:      `Monitor ${h.ticker} under ${analysis.scenario.name}`,
+      reason:     `${h.themeName} theme: impact ${h.impactScore} in this scenario`,
+      confidence: 62,
+    })),
+    relatedEntities: [
+      { type: "regime" as const, id: analysis.regime.name, label: analysis.regime.name },
+      ...topWinners.slice(0, 2).map(h => ({ type: "company" as const, id: h.ticker, label: h.ticker })),
+      ...topLosers.slice(0, 2).map(h => ({ type: "company" as const, id: h.ticker, label: h.ticker })),
+    ],
+  };
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export async function answerQuestion(question: string): Promise<CopilotAnswer> {
@@ -845,8 +1503,26 @@ export async function answerQuestion(question: string): Promise<CopilotAnswer> {
     case "discovery":
       partial = await answerDiscovery();
       break;
+    case "catalyst":
+      partial = await answerCatalyst();
+      break;
+    case "company_scout":
+      partial = await answerCompanyScout();
+      break;
+    case "mention_intel":
+      partial = await answerMentionIntel();
+      break;
     case "theme_scout":
       partial = await answerThemeScout(question);
+      break;
+    case "theme_dossier":
+      partial = await answerThemeDossier(question);
+      break;
+    case "private_scout":
+      partial = await answerPrivateScout(question);
+      break;
+    case "macro_ripple":
+      partial = await answerMacroRipple(question);
       break;
     case "macro":
     default:

@@ -11,6 +11,7 @@
 import { db } from "./db";
 import { getLatestMacroSnapshots, getLatestMarketSnapshots, type LatestMacro, type LatestMarket } from "./macro-ingestion";
 import { interpretVIX } from "./market-data-client";
+import { computePortfolioValue } from "./portfolio-value-engine";
 
 // ─── Output types ─────────────────────────────────────────────────────────────
 
@@ -216,50 +217,61 @@ interface PortfolioState {
 }
 
 async function computePortfolioState(): Promise<PortfolioState> {
-  const positions = await db.position.findMany({
+  const snapshot = await computePortfolioValue();
+  const usdthb = snapshot.usdthb ?? 35;
+
+  // Load Position metadata for name, sector, assetClass (thesis-tracking table)
+  const posMeta = await db.position.findMany({
     where: { status: "active" },
-    select: { id: true, ticker: true, name: true, sector: true, assetClass: true, allocationPct: true, currentValueUsd: true },
+    select: { id: true, ticker: true, name: true, sector: true, assetClass: true },
+  });
+  const posMap = new Map(posMeta.map(p => [p.ticker, p]));
+
+  // Load Universe as fallback for tickers without a Position record
+  const holdingTickers = snapshot.holdings.map(h => h.ticker);
+  const univRows = holdingTickers.length > 0
+    ? await db.universe.findMany({
+        where: { ticker: { in: holdingTickers } },
+        select: { ticker: true, companyName: true, sector: true, marketCap: true, country: true },
+      })
+    : [];
+  const univMap = new Map(univRows.map(u => [u.ticker, u]));
+
+  // Build equity positions from live holdings
+  const equityPositions: PortfolioPosition[] = snapshot.holdings.map(h => {
+    const pos = posMap.get(h.ticker);
+    const univ = univMap.get(h.ticker);
+    return {
+      id:             pos?.id ?? h.ticker,
+      ticker:         h.ticker,
+      name:           pos?.name ?? univ?.companyName ?? h.ticker,
+      sector:         pos?.sector ?? univ?.sector ?? null,
+      assetClass:     pos?.assetClass ?? "equity",
+      allocationPct:  h.allocationPct,
+      currentValueUsd: h.marketValueUsd,
+      pct:            h.allocationPct ?? 0,
+    };
   });
 
-  // Resolve allocations — prefer allocationPct, fall back to currentValueUsd
-  const allocations = positions.map(p => ({
-    ...p,
-    pct: p.allocationPct ?? 0,
-  }));
-  const totalPct = allocations.reduce((s, a) => s + a.pct, 0);
-  // Normalize if pcts don't sum to ~100 (or are all 0)
-  const normalize = totalPct > 20 ? (pct: number) => (pct / totalPct) * 100 : (_: number) => 0;
-  const resolved = allocations.map(a => ({ ...a, pct: normalize(a.pct) }));
+  // Cash: aggregate of all CashAccount balances
+  const cashValueUsd = snapshot.totalCashThb / usdthb;
+  const cashPct = snapshot.totalValueThb > 0 ? (snapshot.totalCashThb / snapshot.totalValueThb) * 100 : 0;
+  const cashPos: PortfolioPosition = {
+    id: "CASH", ticker: "CASH", name: "Cash Accounts", sector: null,
+    assetClass: "cash", allocationPct: cashPct, currentValueUsd: cashValueUsd, pct: cashPct,
+  };
 
-  // If normalization failed (no allocationPct), try currentValueUsd
-  let final = resolved;
-  if (final.every(p => p.pct === 0)) {
-    const totalUsd = positions.reduce((s, p) => s + (p.currentValueUsd ?? 0), 0);
-    if (totalUsd > 0) {
-      final = positions.map(p => ({
-        ...p,
-        pct: ((p.currentValueUsd ?? 0) / totalUsd) * 100,
-      }));
-    }
-  }
-
-  const cashPos = final.find(p => p.ticker === "CASH");
-  const cashPct = cashPos?.pct ?? 0;
-  const cashValueUsd = cashPos?.currentValueUsd ?? 0;
-
-  // Estimate total portfolio value from cash position
-  const totalValueUsd = cashPct > 0 && cashValueUsd > 0
-    ? (cashValueUsd / cashPct) * 100
-    : final.reduce((s, p) => s + (p.currentValueUsd ?? 0), 0);
+  const final = [...equityPositions, ...(cashPct > 0 ? [cashPos] : [])];
+  const totalValueUsd = snapshot.totalValueThb / usdthb;
 
   // Hedge %
-  const hedgePct = final
+  const hedgePct = equityPositions
     .filter(p => HEDGE_TICKERS.has(p.ticker))
     .reduce((s, p) => s + p.pct, 0);
 
-  // Sector breakdown (exclude CASH)
+  // Sector breakdown (exclude cash and hedges for sector classification)
   const sectorMap = new Map<string, number>();
-  for (const p of final.filter(p => p.ticker !== "CASH")) {
+  for (const p of equityPositions) {
     const sector = p.sector ?? "Unknown";
     sectorMap.set(sector, (sectorMap.get(sector) ?? 0) + p.pct);
   }
@@ -267,29 +279,18 @@ async function computePortfolioState(): Promise<PortfolioState> {
     .map(([sector, pct]) => ({ sector, pct }))
     .sort((a, b) => b.pct - a.pct);
 
-  // Look up universe for size classification
-  const equityTickers = final.filter(p => p.ticker !== "CASH" && !HEDGE_TICKERS.has(p.ticker)).map(p => p.ticker);
-  const universeMap = new Map<string, { marketCap: number | null; country: string }>();
-  if (equityTickers.length > 0) {
-    const entries = await db.universe.findMany({
-      where: { ticker: { in: equityTickers } },
-      select: { ticker: true, marketCap: true, country: true },
-    });
-    for (const e of entries) universeMap.set(e.ticker, { marketCap: e.marketCap, country: e.country });
-  }
-
+  // Size/style classification
   let largePct = 0, midPct = 0, smallPct = 0, internationalPct = 0, growthPct = 0, valuePct = 0;
-  for (const p of final.filter(p => p.ticker !== "CASH")) {
-    const u = universeMap.get(p.ticker);
+  for (const p of equityPositions) {
+    if (HEDGE_TICKERS.has(p.ticker)) continue;
+    const u = univMap.get(p.ticker);
     const cap = u?.marketCap ?? null;
     if (cap !== null) {
-      if (cap >= 10000) largePct += p.pct;        // >$10B USD millions
-      else if (cap >= 2000) midPct += p.pct;      // $2B-$10B
+      if (cap >= 10000) largePct += p.pct;
+      else if (cap >= 2000) midPct += p.pct;
       else smallPct += p.pct;
-    } else if (HEDGE_TICKERS.has(p.ticker)) {
-      // skip — hedge
     } else {
-      largePct += p.pct; // assume large if unknown
+      largePct += p.pct; // assume large-cap if unknown
     }
     if (u && u.country !== "US") internationalPct += p.pct;
     if (GROWTH_TICKERS.has(p.ticker)) growthPct += p.pct;
@@ -297,13 +298,10 @@ async function computePortfolioState(): Promise<PortfolioState> {
     if (INTL_TICKERS.has(p.ticker)) internationalPct += p.pct;
   }
 
-  const nonCash = final.filter(p => p.ticker !== "CASH");
-  const largestPos = nonCash.reduce<{ ticker: string; pct: number } | null>((max, p) => {
+  const largestPos = equityPositions.reduce<{ ticker: string; pct: number } | null>((max, p) => {
     if (!max || p.pct > max.pct) return { ticker: p.ticker, pct: p.pct };
     return max;
   }, null);
-
-  const largestSec = sectorBreakdown[0] ? { sector: sectorBreakdown[0].sector, pct: sectorBreakdown[0].pct } : null;
 
   return {
     positions: final,
@@ -318,9 +316,9 @@ async function computePortfolioState(): Promise<PortfolioState> {
     internationalPct,
     growthPct,
     valuePct,
-    positionCount: nonCash.length,
+    positionCount: equityPositions.length,
     largestPosition: largestPos,
-    largestSector: largestSec,
+    largestSector: sectorBreakdown[0] ?? null,
   };
 }
 
@@ -1004,13 +1002,22 @@ export async function generateBlueprint(): Promise<PortfolioBlueprintData> {
   const since30d = new Date(Date.now() - 30 * 86400 * 1000);
 
   // Load portfolio state + real-world data in parallel (Phase 11)
-  const [state, macroData, marketData] = await Promise.all([
+  const [state, macroData, marketData, latestBrief] = await Promise.all([
     computePortfolioState(),
     getLatestMacroSnapshots(),
     getLatestMarketSnapshots(),
+    db.morningBrief.findFirst({ orderBy: { briefingDate: "desc" }, select: { marketRegime: true, marketRegimeEvidence: true } }).catch(() => null),
   ]);
 
-  const regimeResult = await determineRegime(since30d, marketData);
+  // Prefer the cached morning brief regime — it is authoritative and avoids duplicate computation
+  let regimeResult: { regime: Regime; evidence: string[] };
+  if (latestBrief?.marketRegime) {
+    let evidence: string[] = [];
+    try { evidence = JSON.parse(latestBrief.marketRegimeEvidence ?? "[]"); } catch { /* ignore */ }
+    regimeResult = { regime: latestBrief.marketRegime as Regime, evidence };
+  } else {
+    regimeResult = await determineRegime(since30d, marketData);
+  }
 
   const [committeeCount, oppCount, radarCount, thesisCount] = await Promise.all([
     db.committeeSession.count(),

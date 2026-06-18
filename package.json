@@ -33,11 +33,15 @@
     "import:excel-history": "tsx scripts/import-excel-history.ts",
     "snapshot:create": "tsx scripts/create-snapshot.ts",
     "gmail:bootstrap": "tsx scripts/gmail-bootstrap.ts",
-    "newsletter:refresh": "tsx -e \"import('@/lib/newsletter-engine').then(m => m.runNewsletterRefresh()).then(r => console.log(JSON.stringify(r, null, 2)))\""
+    "newsletter:refresh": "tsx -e \"import('@/lib/newsletter-engine').then(m => m.runNewsletterRefresh()).then(r => console.log(JSON.stringify(r, null, 2)))\"",
+    "expand:universe": "tsx scripts/run-universe-expand.ts expand",
+    "expand:ingest": "tsx scripts/run-universe-expand.ts ingest 40",
+    "expand:stats": "tsx scripts/run-universe-expand.ts stats"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@prisma/client": "^5.22.0",
+    "headroom-ai": "^0.22.4",
     "next": "^14.2.0",
     "nodemailer": "^8.0.10",
     "react": "^18.3.0",

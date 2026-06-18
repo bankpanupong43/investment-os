@@ -94,13 +94,21 @@ const BUCKET_REGIME_PERF: Record<BucketId, Record<SimRegime, number>> = {
     "Recession":             20,
     "Liquidity Crisis":      25,
   },
-  healthcare: {
-    "AI Expansion":          55,
-    "Geopolitical Conflict": 62,
-    "Inflation Shock":       58,
-    "Dollar Crisis":         58,
-    "Recession":             60,
-    "Liquidity Crisis":      52,
+  midcap: {
+    "AI Expansion":          80,
+    "Geopolitical Conflict": 30,
+    "Inflation Shock":       30,
+    "Dollar Crisis":         45,
+    "Recession":             15,
+    "Liquidity Crisis":      20,
+  },
+  emerging: {
+    "AI Expansion":          70,
+    "Geopolitical Conflict": 35,
+    "Inflation Shock":       42,
+    "Dollar Crisis":         65,
+    "Recession":             25,
+    "Liquidity Crisis":      22,
   },
   defense: {
     "AI Expansion":          55,
@@ -146,19 +154,20 @@ const BUCKET_REGIME_PERF: Record<BucketId, Record<SimRegime, number>> = {
 
 // Base long-run expected return potential per bucket (regime-agnostic)
 const BUCKET_RETURN_BASE: Record<BucketId, number> = {
-  growth:     92,
-  broad:      72,
-  healthcare: 64,
-  defense:    58,
-  other:      52,
-  gold:       38,
-  cash:       18,
+  growth:   92,
+  midcap:   80,
+  emerging: 75,
+  broad:    72,
+  defense:  58,
+  other:    52,
+  gold:     38,
+  cash:     18,
 };
 
 const THEME_TO_BUCKET: Record<ThemeId, BucketId> = {
   "ai-infrastructure": "growth",
   "semiconductors":    "growth",
-  "healthcare":        "healthcare",
+  "healthcare":        "other",
   "defense":           "defense",
   "cybersecurity":     "growth",
   "consumer":          "growth",

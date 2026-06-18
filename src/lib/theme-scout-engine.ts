@@ -176,19 +176,22 @@ export type ThemeMomentum = "Rising" | "Stable" | "Falling";
 export type ThemeConfidence = "high" | "medium" | "low";
 
 export interface ThemeScoutResult {
-  theme:        string;
-  score:        number;
-  score7d:      number;
-  score30d:     number;
-  score90d:     number;
-  status:       ThemeStatus;
-  confidence:   ThemeConfidence;
-  momentum:     ThemeMomentum;
-  sources:      string[];
-  mentionCount: number;
-  candidates:   ThemeCandidate[];
-  drivers:      string[];
-  isExtended:   boolean;
+  theme:                string;
+  score:                number;
+  score7d:              number;
+  score30d:             number;
+  score90d:             number;
+  noveltyScore:         number;  // Phase 27B: how under-researched (0-100)
+  researchPriority:     number;  // Phase 27B: novelty × momentum × signal (0-100)
+  portfolioExposurePct: number;  // Phase 27B: % theme tickers in portfolio+watchlist
+  status:               ThemeStatus;
+  confidence:           ThemeConfidence;
+  momentum:             ThemeMomentum;
+  sources:              string[];
+  mentionCount:         number;
+  candidates:           ThemeCandidate[];
+  drivers:              string[];
+  isExtended:           boolean;
 }
 
 export interface ThemeCandidate {
@@ -249,8 +252,9 @@ export async function scanThemes(): Promise<ThemeScoutResult[]> {
   const since30d = new Date(now - 30 * 86400 * 1000);
   const since90d = new Date(now - 90 * 86400 * 1000);
 
-  // Load all data sources in parallel
-  const [newsletters, morningBriefs, radarCandidates, opportunityScores, committeeSessions] = await Promise.all([
+  // Load all data sources in parallel (including portfolio/research data for novelty scoring)
+  const [newsletters, morningBriefs, radarCandidates, opportunityScores, committeeSessions,
+         portfolioPositions, watchlistItems, researchDossiers] = await Promise.all([
     db.newsletterItem.findMany({
       where: { publishedAt: { gte: since90d } },
       select: { source: true, title: true, summary: true, keyPoints: true, marketImplications: true, publishedAt: true },
@@ -273,7 +277,19 @@ export async function scanThemes(): Promise<ThemeScoutResult[]> {
       distinct: ["ticker"],
       select: { ticker: true, conviction: true },
     }),
+    // Phase 27B: portfolio coverage for novelty scoring
+    db.position.findMany({ where: { status: "active" }, select: { ticker: true } }),
+    db.watchlist.findMany({ select: { ticker: true } }),
+    db.researchDossier.findMany({ select: { ticker: true } }),
   ]);
+
+  // Phase 27B: coverage sets
+  const portfolioTickers = new Set([
+    ...portfolioPositions.map(p => p.ticker),
+    ...watchlistItems.map(w => w.ticker),
+  ]);
+  const dossierTickers   = new Set(researchDossiers.map(d => d.ticker));
+  const committeeTickerSet = new Set(committeeSessions.map(s => s.ticker));
 
   // Build lookup maps
   const oppMap       = new Map(opportunityScores.map(o => [o.ticker, o.opportunityScore]));
@@ -451,20 +467,58 @@ export async function scanThemes(): Promise<ThemeScoutResult[]> {
 
     const allSources = [...win90d.sources].map(s => s.replace(/_/g, " "));
 
+    // ── Phase 27B: Novelty Score (0-100) ──────────────────────────────────────
+    // Measures how under-researched / early this theme is.
+    //
+    //   portfolioGap   (0-30): fewer theme tickers in portfolio+watchlist → higher novelty
+    //   researchGap    (0-20): fewer research dossiers for theme tickers  → higher novelty
+    //   extensionBonus (0-30): isExtended (not in existing allocation map) → +30
+    //   signalHistory  (0-10): low 90d signal history → higher novelty
+    //   committeeGap   (0-10): no committee sessions for any theme ticker → +10
+
+    const coveredByPortfolio = def.tickers.filter(t => portfolioTickers.has(t)).length;
+    const portfolioExposurePct = def.tickers.length > 0
+      ? Math.round((coveredByPortfolio / def.tickers.length) * 100)
+      : 0;
+
+    const portfolioGap    = Math.round((1 - coveredByPortfolio / Math.max(def.tickers.length, 1)) * 30);
+    const coveredByDossier = def.tickers.filter(t => dossierTickers.has(t)).length;
+    const researchGap     = Math.round((1 - coveredByDossier / Math.max(def.tickers.length, 1)) * 20);
+    const extensionBonus  = def.isExtended ? 30 : 0;
+    const signalHistoryGap = score90d < 5 ? 10 : score90d < 15 ? 5 : 0;
+    const hasCommittee    = def.tickers.some(t => committeeTickerSet.has(t));
+    const committeeGap    = hasCommittee ? 0 : 10;
+
+    const noveltyScore = Math.min(100, Math.max(0,
+      portfolioGap + researchGap + extensionBonus + signalHistoryGap + committeeGap
+    ));
+
+    // ── Phase 27B: Research Priority (0-100) ──────────────────────────────────
+    // Combines novelty with signal momentum — what to investigate NEXT.
+    // formula: novelty × momentumFactor × 0.01 × 100 + signalBonus
+    const momentumFactor = momentum === "Rising" ? 0.9 : momentum === "Stable" ? 0.65 : 0.35;
+    const signalBonus    = Math.min(8, score / 12);
+    const researchPriority = Math.min(100, Math.max(0,
+      Math.round((noveltyScore / 100) * momentumFactor * 100 + signalBonus)
+    ));
+
     results.push({
-      theme:        themeName,
+      theme:                themeName,
       score,
       score7d,
       score30d,
       score90d,
+      noveltyScore,
+      researchPriority,
+      portfolioExposurePct,
       status,
       confidence,
       momentum,
-      sources:      allSources,
-      mentionCount: win90d.mentions,
-      candidates:   watchlistCandidates,
+      sources:              allSources,
+      mentionCount:         win90d.mentions,
+      candidates:           watchlistCandidates,
       drivers,
-      isExtended:   def.isExtended,
+      isExtended:           def.isExtended,
     });
   }
 
@@ -512,39 +566,45 @@ export async function saveThemeScoutData(results: ThemeScoutResult[]): Promise<v
     await db.themeScout.upsert({
       where: { theme: r.theme },
       create: {
-        theme:        r.theme,
-        score:        r.score,
-        score7d:      r.score7d,
-        score30d:     r.score30d,
-        score90d:     r.score90d,
-        status:       r.status,
-        confidence:   r.confidence,
-        momentum:     r.momentum,
-        sources:      JSON.stringify(r.sources),
-        mentionCount: r.mentionCount,
-        firstSeen:    now,
-        lastSeen:     now,
-        candidates:   JSON.stringify(r.candidates),
-        drivers:      JSON.stringify(r.drivers),
-        isExtended:   r.isExtended,
-        refreshedAt:  now,
+        theme:                r.theme,
+        score:                r.score,
+        score7d:              r.score7d,
+        score30d:             r.score30d,
+        score90d:             r.score90d,
+        noveltyScore:         r.noveltyScore,
+        researchPriority:     r.researchPriority,
+        portfolioExposurePct: r.portfolioExposurePct,
+        status:               r.status,
+        confidence:           r.confidence,
+        momentum:             r.momentum,
+        sources:              JSON.stringify(r.sources),
+        mentionCount:         r.mentionCount,
+        firstSeen:            now,
+        lastSeen:             now,
+        candidates:           JSON.stringify(r.candidates),
+        drivers:              JSON.stringify(r.drivers),
+        isExtended:           r.isExtended,
+        refreshedAt:          now,
       },
       update: {
-        score:        r.score,
-        score7d:      r.score7d,
-        score30d:     r.score30d,
-        score90d:     r.score90d,
-        status:       r.status,
-        confidence:   r.confidence,
-        momentum:     r.momentum,
-        sources:      JSON.stringify(r.sources),
-        mentionCount: r.mentionCount,
-        firstSeen:    existing?.firstSeen ?? now,  // preserve original firstSeen
-        lastSeen:     now,
-        candidates:   JSON.stringify(r.candidates),
-        drivers:      JSON.stringify(r.drivers),
-        isExtended:   r.isExtended,
-        refreshedAt:  now,
+        score:                r.score,
+        score7d:              r.score7d,
+        score30d:             r.score30d,
+        score90d:             r.score90d,
+        noveltyScore:         r.noveltyScore,
+        researchPriority:     r.researchPriority,
+        portfolioExposurePct: r.portfolioExposurePct,
+        status:               r.status,
+        confidence:           r.confidence,
+        momentum:             r.momentum,
+        sources:              JSON.stringify(r.sources),
+        mentionCount:         r.mentionCount,
+        firstSeen:            existing?.firstSeen ?? now,
+        lastSeen:             now,
+        candidates:           JSON.stringify(r.candidates),
+        drivers:              JSON.stringify(r.drivers),
+        isExtended:           r.isExtended,
+        refreshedAt:          now,
       },
     });
   }
@@ -560,19 +620,22 @@ export async function getThemeScoutReport(): Promise<ThemeScoutReport | null> {
   if (rows.length === 0) return null;
 
   const results: ThemeScoutResult[] = rows.map(r => ({
-    theme:        r.theme,
-    score:        r.score,
-    score7d:      r.score7d,
-    score30d:     r.score30d,
-    score90d:     r.score90d,
-    status:       r.status as ThemeStatus,
-    confidence:   r.confidence as ThemeConfidence,
-    momentum:     r.momentum as ThemeMomentum,
-    sources:      safeParseArray(r.sources),
-    mentionCount: r.mentionCount,
-    candidates:   (() => { try { return JSON.parse(r.candidates) as ThemeCandidate[]; } catch { return []; } })(),
-    drivers:      safeParseArray(r.drivers),
-    isExtended:   r.isExtended,
+    theme:                r.theme,
+    score:                r.score,
+    score7d:              r.score7d,
+    score30d:             r.score30d,
+    score90d:             r.score90d,
+    noveltyScore:         r.noveltyScore,
+    researchPriority:     r.researchPriority,
+    portfolioExposurePct: r.portfolioExposurePct,
+    status:               r.status as ThemeStatus,
+    confidence:           r.confidence as ThemeConfidence,
+    momentum:             r.momentum as ThemeMomentum,
+    sources:              safeParseArray(r.sources),
+    mentionCount:         r.mentionCount,
+    candidates:           (() => { try { return JSON.parse(r.candidates) as ThemeCandidate[]; } catch { return []; } })(),
+    drivers:              safeParseArray(r.drivers),
+    isExtended:           r.isExtended,
   }));
 
   const latest = rows.reduce((a, b) => a.refreshedAt > b.refreshedAt ? a : b);

@@ -17,6 +17,11 @@ import { runMacroIngestion } from "./macro-ingestion";
 import { runNewsletterRefresh } from "./newsletter-engine";
 import { generatePortfolioDecisionReviews, saveDecisionReview } from "./decision-review-engine";
 import { generateThemeScoutReport, saveThemeScoutData, writeThemeScoutToWiki } from "./theme-scout-engine";
+import { refreshResearchQueueDossiers } from "./research-dossier-engine";
+import { extractNewMentions } from "./ticker-extractor";
+import { buildDiscoveryCandidates } from "./discovery-intelligence-engine";
+import { generateCompanyScoutReport } from "./company-scout-engine";
+import { generatePrivateScoutReport } from "./private-scout-engine";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,12 +76,17 @@ export const JOB_NAMES = [
   "portfolio_review_refresh",
   "newsletter_refresh",
   "morning_brief",
+  "ticker_extraction",
+  "discovery_intelligence",
+  "company_scout",
   "brain_os_export",
   "radar_refresh",
   "portfolio_architect",
   "portfolio_architecture_review",
   "decision_review",
   "theme_scout",
+  "research_dossier",
+  "private_scout",
 ] as const;
 
 export type JobName = typeof JOB_NAMES[number];
@@ -96,13 +106,18 @@ export const JOB_LABELS: Record<JobName, string> = {
   dossier_refresh: "Dossier Refresh",
   portfolio_review_refresh: "Portfolio Review Refresh",
   newsletter_refresh: "Newsletter Intelligence",
-  brain_os_export: "Brain OS Export",
+  ticker_extraction:       "Ticker Extraction",
+  discovery_intelligence:  "Discovery Intelligence",
+  company_scout:           "Company Scout",
+  brain_os_export:         "Brain OS Export",
   morning_brief: "Morning Brief",
   radar_refresh: "Discovery Radar",
   portfolio_architect: "Portfolio Architect",
   portfolio_architecture_review: "Portfolio Architecture Review",
-  decision_review: "Decision Review",
-  theme_scout: "Theme Scout",
+  decision_review:   "Decision Review",
+  theme_scout:       "Theme Scout",
+  research_dossier:  "Research Dossier Agent",
+  private_scout:     "Private Market Scout",
 };
 
 // Each job function returns a JobResult
@@ -118,13 +133,18 @@ const JOB_RUNNERS: Record<JobName, () => Promise<JobResult>> = {
   dossier_refresh: runDossierRefresh,
   portfolio_review_refresh: runPortfolioReviewRefresh,
   newsletter_refresh: runNewsletterRefresh_,
-  brain_os_export: runBrainOsExport,
+  ticker_extraction:      runTickerExtraction,
+  discovery_intelligence: runDiscoveryIntelligence,
+  company_scout:          runCompanyScout,
+  brain_os_export:        runBrainOsExport,
   morning_brief: runMorningBrief,
   radar_refresh: runRadarRefresh,
   portfolio_architect: runPortfolioArchitect,
   portfolio_architecture_review: runPortfolioArchitectureReview,
-  decision_review: runDecisionReview,
-  theme_scout: runThemeScout,
+  decision_review:  runDecisionReview,
+  theme_scout:      runThemeScout,
+  research_dossier: runResearchDossier,
+  private_scout:    runPrivateScout,
 };
 
 // ─── Individual job implementations ──────────────────────────────────────────
@@ -501,6 +521,60 @@ async function runThemeScout(): Promise<JobResult> {
   return {
     success: true,
     summary: `Theme Scout: ${report.all.length} themes scored. ${emerging} emerging, ${accelerating} accelerating, ${weakening} weakening.${top ? ` Top: ${top.theme} (${top.score})` : ""}`,
+  };
+}
+
+async function runResearchDossier(): Promise<JobResult> {
+  const result = await refreshResearchQueueDossiers();
+  if (result.generated === 0 && result.skipped === 0) {
+    return { success: true, summary: "Research Dossier: No themes with priority ≥70 — run Theme Scout first." };
+  }
+  return {
+    success: result.generated > 0,
+    summary: `Research Dossier: Generated ${result.generated} dossier(s).${result.generated > 0 ? ` Themes: ${result.themes.slice(0, 3).join(", ")}${result.themes.length > 3 ? "…" : ""}` : ""}${result.skipped > 0 ? ` Skipped: ${result.skipped}` : ""}`,
+  };
+}
+
+async function runTickerExtraction(): Promise<JobResult> {
+  const result = await extractNewMentions();
+  if (result.processed === 0) {
+    return { success: true, summary: "Ticker Extraction: No new sources to process." };
+  }
+  return {
+    success: true,
+    summary: `Ticker Extraction: Processed ${result.processed} source(s), wrote ${result.newMentions} new mention(s).${result.errors > 0 ? ` Errors: ${result.errors}` : ""}`,
+  };
+}
+
+async function runDiscoveryIntelligence(): Promise<JobResult> {
+  const result = await buildDiscoveryCandidates();
+  return {
+    success: true,
+    summary: `Discovery Intelligence: ${result.processed} ticker${result.processed !== 1 ? "s" : ""} scored, ${result.promoted} candidate${result.promoted !== 1 ? "s" : ""} promoted, ${result.queued} added to watchlist.${result.errors > 0 ? ` Errors: ${result.errors}` : ""}`,
+  };
+}
+
+async function runCompanyScout(): Promise<JobResult> {
+  const report = await generateCompanyScoutReport();
+  const audit  = report.coverageAudit;
+  const cats   = [
+    report.consensus.length    > 0 ? `${report.consensus.length} Consensus`    : "",
+    report.hiddenGems.length   > 0 ? `${report.hiddenGems.length} Hidden Gem`  : "",
+    report.emerging.length     > 0 ? `${report.emerging.length} Emerging`      : "",
+    report.accelerating.length > 0 ? `${report.accelerating.length} Accelerating` : "",
+  ].filter(Boolean).join(", ") || "all Monitoring";
+  return {
+    success: true,
+    summary: `Company Scout: ${audit.totalTracked} tracked, ${audit.newCompanies} new (${(audit.newCompanies / Math.max(audit.totalTracked, 1) * 100).toFixed(0)}% discovery). Categories: ${cats}. Auto-queued: ${report.autoQueued}.${audit.biasDetected ? " BIAS DETECTED." : ""}`,
+  };
+}
+
+async function runPrivateScout(): Promise<JobResult> {
+  const report = await generatePrivateScoutReport();
+  const top3   = report.topCandidates.slice(0, 3).map(c => `${c.companyName} (${c.discoveryScore})`).join(", ");
+  return {
+    success: true,
+    summary: `Private Scout: ${report.totalScanned} private companies scanned. Top: ${top3 || "none"}. Beneficiary tickers: ${report.topPublicBeneficiaries.slice(0, 5).map(b => b.ticker).join(", ")}.`,
   };
 }
 

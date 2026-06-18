@@ -278,5 +278,117 @@
     "fileSize": 6120078,
     "checksum": "e566448b0d620d3dc76f2d74c72cb7dd9341f4587dcb92afe65dc838f6a2572f",
     "createdAt": "2026-06-12T17:38:34.067Z"
+  },
+  {
+    "id": "cmqegllnr00012cyag7bm5ds9",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-06-15-071238",
+    "fileSize": 6120078,
+    "checksum": "cce5677e22b7f2cf62714519fcf46e7021b855da9ec7ba3dd7094244549ba3e1",
+    "createdAt": "2026-06-15T00:12:39.016Z"
+  },
+  {
+    "id": "cmqegllq200022cyawt12ids9",
+    "backupType": "full_snapshot",
+    "filePath": "backups/full/2026-06-15-071238",
+    "fileSize": 7115329,
+    "checksum": "d360c2456ca6f2c4dbfb5994a24c25b46640f89769dc00aa0639a69511b86f11",
+    "createdAt": "2026-06-15T00:12:39.098Z"
+  },
+  {
+    "id": "cmqegoyxx00aq2cyawgnfgzoi",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-06-15-071515",
+    "fileSize": 6203053,
+    "checksum": "be79bb5e4447cbfa0eea49d3e204a34feed6b44918b2e90fae73c288cc55b508",
+    "createdAt": "2026-06-15T00:15:16.197Z"
+  },
+  {
+    "id": "cmqf4j7000001znm3rxqo1qem",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-06-15-182237",
+    "fileSize": 6203053,
+    "checksum": "ad386a7fe5447e021913c74317c819977dc7b0b768baedc960b789d50b9562a4",
+    "createdAt": "2026-06-15T11:22:37.489Z"
+  },
+  {
+    "id": "cmqf4j73l0002znm3jrnn6vfo",
+    "backupType": "full_snapshot",
+    "filePath": "backups/full/2026-06-15-182236",
+    "fileSize": 7225921,
+    "checksum": "5cda484f1b181b59a8ca78a3c6696643fcf89c0d4955d9789721d0b53266cd58",
+    "createdAt": "2026-06-15T11:22:37.618Z"
+  },
+  {
+    "id": "cmqf4lmcn00aoznm3nsvm05hr",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-06-15-182430",
+    "fileSize": 6297216,
+    "checksum": "503f4f0e020ebd2dc823fa367b997f3d944a35ba1d5287dad5c237ca4d0622d5",
+    "createdAt": "2026-06-15T11:24:30.696Z"
+  },
+  {
+    "id": "cmqfc8wu0000am1f75bv3z9ar",
+    "backupType": "database",
+    "filePath": "backups/database/2026-06-15-215834.db",
+    "fileSize": 7364608,
+    "checksum": "97b45a9a7e9707e442c91d6e4a46ad1f8b6bf5063a3215bf8a253e58c88d5862",
+    "createdAt": "2026-06-15T14:58:34.681Z"
+  },
+  {
+    "id": "cmqfc8ycx000bm1f7ugoanglt",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-06-15-215836",
+    "fileSize": 6297226,
+    "checksum": "83f1105b99a2468d269f294d4e4d8da3bcde77cda52c2ec033e3592f6b903d0f",
+    "createdAt": "2026-06-15T14:58:36.658Z"
+  },
+  {
+    "id": "cmqfgp4tz0001chgc94g43wn6",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-06-16-000309",
+    "fileSize": 6297216,
+    "checksum": "7671a0eb3fab875720b8b064ae3cde7e3abb4c15136d2cebf3ded433aea2f0c9",
+    "createdAt": "2026-06-15T17:03:10.008Z"
+  },
+  {
+    "id": "cmqfgp4wg0002chgcbwtwcesu",
+    "backupType": "full_snapshot",
+    "filePath": "backups/full/2026-06-16-000309",
+    "fileSize": 7365185,
+    "checksum": "677db74344cacd9e06d5881e5a2878a2eaec160b07e46ead61cad214fe0a5ab7",
+    "createdAt": "2026-06-15T17:03:10.096Z"
+  },
+  {
+    "id": "cmqfgre6800anchgcpam5g6y7",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-06-16-000455",
+    "fileSize": 6379069,
+    "checksum": "71248813d8406fb0502259e10136f6ffedda8b535f259dbab5687f219bf97f17",
+    "createdAt": "2026-06-15T17:04:55.425Z"
+  },
+  {
+    "id": "cmqjkyh5o000180vmdy8ncf3e",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-06-18-211328",
+    "fileSize": 7083580,
+    "checksum": "f858e947a3e8784cef24ccc4c38ff40650a9862aaf00f8cacd1a0184e97c09ff",
+    "createdAt": "2026-06-18T14:13:29.052Z"
+  },
+  {
+    "id": "cmqjkyhdt000280vms830kycl",
+    "backupType": "full_snapshot",
+    "filePath": "backups/full/2026-06-18-211328",
+    "fileSize": 8753729,
+    "checksum": "13e77acde46474cb02d3d9c5624c2313072cb1a55cb60e91fd00e0e594717963",
+    "createdAt": "2026-06-18T14:13:29.346Z"
+  },
+  {
+    "id": "cmqjlmu2i03mf80vm9b6selig",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-06-18-213225",
+    "fileSize": 7190682,
+    "checksum": "47ac8f04072df38fbbd7fc6156162d67fe9093023681739acef0f6fcd1d31187",
+    "createdAt": "2026-06-18T14:32:25.530Z"
   }
 ]

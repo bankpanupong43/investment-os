@@ -104,10 +104,20 @@ export interface NewsletterInsight {
   url?: string;
 }
 
+export interface TradeIdea {
+  action: "BUY" | "TRIM" | "WATCH";
+  ticker: string;
+  thesis: string;
+  risk: string;
+  urgency: "high" | "medium" | "low";
+}
+
 export interface MorningBriefData {
   briefingDate: Date;
   marketRegime: MarketRegime;
   marketRegimeEvidence: string[];
+  topCall: string;
+  tradeIdeas: TradeIdea[];
   macroSummary: MacroSummary;
   geopoliticalSummary: GeopoliticalSummary;
   technologySummary: TechnologySummary;
@@ -134,6 +144,7 @@ export interface MorningBriefData {
   };
   institutionalResearch?: NewsletterInsight[];
   newsletterConsensus?: NewsletterInsight[];
+  freshnessWarning?: string;
 }
 
 // ─── Sector / theme maps ──────────────────────────────────────────────────────
@@ -159,8 +170,29 @@ interface RegimeSignal {
 async function computeMarketRegime(
   since30d: Date,
   marketData: Record<string, LatestMarket>,
+  geoEvents: RecentGeoEvent[] = [],
 ): Promise<{ regime: MarketRegime; evidence: string[] }> {
   const signals: RegimeSignal = { bullish: 0, bearish: 0, evidence: [] };
+
+  // ── Geopolitical signal ────────────────────────────────────────────────────
+  const critical = geoEvents.filter(e => e.severity === "critical");
+  const high     = geoEvents.filter(e => e.severity === "high");
+
+  if (critical.length > 0) {
+    const penalty = Math.min(critical.length * 2, 4);
+    signals.bearish += penalty;
+    const regions = [...new Set(critical.map(e => e.region))].join(", ");
+    signals.evidence.push(`${critical.length} critical geopolitical event(s) in ${regions}`);
+  } else if (high.length > 0) {
+    const penalty = Math.min(high.length, 2);
+    signals.bearish += penalty;
+    const regions = [...new Set(high.map(e => e.region))].join(", ");
+    signals.evidence.push(`${high.length} high-severity geopolitical event(s) in ${regions}`);
+  } else {
+    // No critical/high events = geopolitical environment constructive
+    signals.bullish += 1;
+    signals.evidence.push("Geopolitical risk contained — no critical or high-severity events active");
+  }
 
   // ── VIX signal (real market data) ─────────────────────────────────────────
   const vixEntry = marketData["VIX"];
@@ -804,6 +836,97 @@ async function buildRecommendedActions(
   return actions.slice(0, 6);
 }
 
+// ─── Top Call ─────────────────────────────────────────────────────────────────
+
+function buildTopCall(
+  regime: MarketRegime,
+  evidence: string[],
+  actions: RecommendedAction[],
+  impact: PortfolioImpact,
+): string {
+  const highUrgency = actions.find(a => a.urgency === "high");
+  if (highUrgency) {
+    return `${highUrgency.action} — ${highUrgency.reason.slice(0, 120)}.`;
+  }
+  if (regime === "Risk Off" && evidence.length > 0) {
+    return `Risk Off regime active (${evidence[0]}) — reduce growth exposure and protect capital.`;
+  }
+  const topNeg = impact.negative[0];
+  if (topNeg) {
+    return `Watch ${topNeg.ticker} — ${topNeg.reason.slice(0, 110)}.`;
+  }
+  const mediumUrgency = actions.find(a => a.urgency === "medium");
+  if (mediumUrgency) {
+    return `${mediumUrgency.action} — ${mediumUrgency.reason.slice(0, 120)}.`;
+  }
+  const topPos = impact.positive[0];
+  if (topPos && regime === "Risk On") {
+    return `${regime} regime — ${topPos.ticker} thesis intact. Maintain or add to growth exposure.`;
+  }
+  return "Nothing material overnight — maintain current positioning.";
+}
+
+// ─── Trade Ideas ──────────────────────────────────────────────────────────────
+
+async function buildTradeIdeas(
+  positions: ActivePosition[],
+  committeeRows: CommitteeRow[],
+  recommendedActions: RecommendedAction[],
+): Promise<TradeIdea[]> {
+  const ideas: TradeIdea[] = [];
+  const held = new Set(positions.map(p => p.ticker));
+
+  // 1. Committee Strong Buy not held → BUY
+  const strongBuys = committeeRows.filter(s => !held.has(s.ticker) && s.conviction === "Strong Buy").slice(0, 2);
+  for (const s of strongBuys) {
+    const session = await db.committeeSession.findFirst({
+      where: { ticker: s.ticker },
+      orderBy: { createdAt: "desc" },
+      select: { summary: true },
+    }).catch(() => null);
+    ideas.push({
+      action: "BUY",
+      ticker: s.ticker,
+      thesis: (session?.summary ?? `Committee Strong Buy on ${s.ticker}.`).slice(0, 130),
+      risk: "No position yet — entry before thesis validated in portfolio context.",
+      urgency: "medium",
+    });
+  }
+
+  // 2. High urgency action with ticker → TRIM
+  const highAction = recommendedActions.find(a => a.urgency === "high" && a.ticker && held.has(a.ticker));
+  if (highAction?.ticker && !ideas.some(i => i.ticker === highAction.ticker)) {
+    ideas.push({
+      action: "TRIM",
+      ticker: highAction.ticker,
+      thesis: highAction.reason.slice(0, 130),
+      risk: "Thesis may recover — early exit risks missing upside if conditions reverse.",
+      urgency: "high",
+    });
+  }
+
+  // 3. Top opportunity not held → WATCH
+  if (ideas.length < 3) {
+    const topOpps = await db.opportunityScore.findMany({
+      orderBy: { opportunityScore: "desc" },
+      take: 10,
+      select: { ticker: true, opportunityScore: true },
+    }).catch(() => []);
+    const newOpp = topOpps.find(o => !held.has(o.ticker) && !ideas.some(i => i.ticker === o.ticker));
+    if (newOpp) {
+      ideas.push({
+        action: "WATCH",
+        ticker: newOpp.ticker,
+        thesis: `Opportunity score ${newOpp.opportunityScore.toFixed(0)}/100 — top-ranked name not yet in portfolio.`,
+        risk: "Score may reflect stale fundamentals — verify with a fresh dossier before entry.",
+        urgency: "low",
+      });
+    }
+  }
+
+  return ideas.slice(0, 3);
+}
+
 // ─── Internal query helpers ───────────────────────────────────────────────────
 
 interface ActivePosition {
@@ -873,13 +996,32 @@ export async function generateMorningBrief(): Promise<MorningBriefData> {
 
   const [regimeResult, macroSummary, geopoliticalSummary, technologySummary, portfolioImpact, recommendedActions] =
     await Promise.all([
-      computeMarketRegime(since30d, marketData),
+      computeMarketRegime(since30d, marketData, geoEvents),
       buildMacroSummary(positions, macroData),
       buildGeopoliticalSummary(positions, universeTop, geoEvents),
       buildTechnologySummary(positions, committeeRows),
       buildPortfolioImpact(positions, committeeRows),
       buildRecommendedActions(positions, committeeRows),
     ]);
+
+  const topCall    = buildTopCall(regimeResult.regime, regimeResult.evidence, recommendedActions, portfolioImpact);
+  const tradeIdeas = await buildTradeIdeas(positions, committeeRows, recommendedActions);
+
+  // Phase 25.1: newsletter freshness gate
+  const latestNewsletter = await db.newsletterItem.findFirst({
+    orderBy: { publishedAt: "desc" },
+    select: { publishedAt: true },
+  }).catch(() => null);
+
+  let freshnessWarning: string | undefined;
+  if (!latestNewsletter) {
+    freshnessWarning = "Newsletter feed empty — run Refresh Newsletters before generating this brief.";
+  } else {
+    const ageHours = (Date.now() - latestNewsletter.publishedAt.getTime()) / 3600000;
+    if (ageHours > 27) {
+      freshnessWarning = `Newsletter feed stale — last email processed ${Math.round(ageHours)} hours ago. Run Refresh Newsletters for current intelligence.`;
+    }
+  }
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -902,6 +1044,8 @@ export async function generateMorningBrief(): Promise<MorningBriefData> {
     briefingDate: today,
     marketRegime: regimeResult.regime,
     marketRegimeEvidence: regimeResult.evidence,
+    topCall,
+    tradeIdeas,
     macroSummary,
     geopoliticalSummary,
     technologySummary,
@@ -928,6 +1072,7 @@ export async function generateMorningBrief(): Promise<MorningBriefData> {
     },
     institutionalResearch: institutional,
     newsletterConsensus: newsletters,
+    freshnessWarning,
   };
 }
 
@@ -986,6 +1131,9 @@ export async function saveMorningBrief(data: MorningBriefData) {
     generatedFromSources: JSON.stringify({
       ...data.generatedFromSources,
       dataSources: data.dataSources,
+      freshnessWarning: data.freshnessWarning,
+      topCall: data.topCall,
+      tradeIdeas: data.tradeIdeas,
     }),
     institutionalResearch: JSON.stringify(data.institutionalResearch ?? []),
     newsletterConsensus:   JSON.stringify(data.newsletterConsensus ?? []),
@@ -1016,13 +1164,15 @@ export function deserializeBrief(record: {
   createdAt: Date;
 }): MorningBriefData & { id: string; createdAt: Date } {
   const sources = JSON.parse(record.generatedFromSources);
-  const { dataSources, ...counts } = sources;
+  const { dataSources, freshnessWarning, topCall, tradeIdeas, ...counts } = sources;
   return {
     id: record.id,
     briefingDate: record.briefingDate,
     createdAt: record.createdAt,
     marketRegime: record.marketRegime as MarketRegime,
     marketRegimeEvidence: JSON.parse(record.marketRegimeEvidence),
+    topCall: (topCall as string | undefined) ?? "Nothing material overnight — maintain current positioning.",
+    tradeIdeas: (tradeIdeas as TradeIdea[] | undefined) ?? [],
     macroSummary: JSON.parse(record.macroSummary),
     geopoliticalSummary: JSON.parse(record.geopoliticalSummary),
     technologySummary: JSON.parse(record.technologySummary),
@@ -1036,5 +1186,6 @@ export function deserializeBrief(record: {
     newsletterConsensus: record.newsletterConsensus
       ? (JSON.parse(record.newsletterConsensus) as NewsletterInsight[])
       : [],
+    freshnessWarning: (freshnessWarning as string | undefined) ?? undefined,
   };
 }

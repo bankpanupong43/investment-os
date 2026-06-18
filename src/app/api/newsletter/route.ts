@@ -1,9 +1,15 @@
-// GET /api/newsletter — list recent newsletter items
+// GET /api/newsletter — list recent newsletter items + freshness metrics
 // POST /api/newsletter — trigger a newsletter refresh run
+// POST /api/newsletter?force=true — force full re-scan (last 30 days)
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { runNewsletterRefresh, SOURCE_LABELS } from "@/lib/newsletter-engine";
+import {
+  runNewsletterRefresh,
+  SOURCE_LABELS,
+  getNewsletterFreshness,
+  getSourceHealthReport,
+} from "@/lib/newsletter-engine";
 import { isGmailConfigured } from "@/lib/gmail-newsletter";
 
 export async function GET(request: Request) {
@@ -13,14 +19,18 @@ export async function GET(request: Request) {
 
   const since = new Date(Date.now() - days * 86400 * 1000);
 
-  const items = await db.newsletterItem.findMany({
-    where: {
-      publishedAt: { gte: since },
-      ...(source ? { source } : {}),
-    },
-    orderBy: { publishedAt: "desc" },
-    take: 100,
-  });
+  const [items, freshness, sourceHealth] = await Promise.all([
+    db.newsletterItem.findMany({
+      where: {
+        publishedAt: { gte: since },
+        ...(source ? { source } : {}),
+      },
+      orderBy: { publishedAt: "desc" },
+      take: 100,
+    }),
+    getNewsletterFreshness(),
+    getSourceHealthReport(),
+  ]);
 
   const serialized = items.map(item => ({
     id:                      item.id,
@@ -44,19 +54,26 @@ export async function GET(request: Request) {
   }, {});
 
   return NextResponse.json({
-    items: serialized,
-    total: serialized.length,
-    bySource: counts,
+    items:           serialized,
+    total:           serialized.length,
+    bySource:        counts,
     gmailConfigured: isGmailConfigured(),
-    period: { days, since: since.toISOString() },
+    period:          { days, since: since.toISOString() },
+    freshness,
+    sourceHealth,
   });
 }
 
-export async function POST() {
+export async function POST(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const force = searchParams.get("force") === "true";
+
   try {
-    const result = await runNewsletterRefresh();
+    const result = await runNewsletterRefresh({ force });
     return NextResponse.json({
-      success: true,
+      success:           true,
+      mode:              result.syncMode,
+      syncSince:         result.syncSince,
       fetched:           result.fetched,
       newItems:          result.newItems,
       duplicatesSkipped: result.duplicatesSkipped,

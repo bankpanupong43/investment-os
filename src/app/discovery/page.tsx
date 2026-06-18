@@ -64,21 +64,22 @@ function Skeleton({ className = "" }: { className?: string }) {
 
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 
-type Tab = "tierA" | "tierB" | "tierC" | "themes" | "gaps";
+type Tab = "tierA" | "tierB" | "tierC" | "themes" | "gaps" | "mentions";
 
 function TabBar({
   active, onChange, counts,
 }: {
   active: Tab;
   onChange: (t: Tab) => void;
-  counts: { tierA: number; tierB: number; tierC: number; themes: number; gaps: number };
+  counts: { tierA: number; tierB: number; tierC: number; themes: number; gaps: number; mentions: number };
 }) {
   const tabs: { id: Tab; label: string; count?: number }[] = [
-    { id: "tierA",  label: "Tier A",        count: counts.tierA  },
-    { id: "tierB",  label: "Tier B",        count: counts.tierB  },
-    { id: "tierC",  label: "Tier C",        count: counts.tierC  },
-    { id: "themes", label: "Themes",        count: counts.themes },
-    { id: "gaps",   label: "Portfolio Gaps", count: counts.gaps  },
+    { id: "tierA",    label: "Tier A",        count: counts.tierA    },
+    { id: "tierB",    label: "Tier B",        count: counts.tierB    },
+    { id: "tierC",    label: "Tier C",        count: counts.tierC    },
+    { id: "themes",   label: "Themes",        count: counts.themes   },
+    { id: "gaps",     label: "Portfolio Gaps", count: counts.gaps    },
+    { id: "mentions", label: "Mentions",      count: counts.mentions },
   ];
   return (
     <div className="flex border-b border-[#EEEEEE] bg-white px-5 overflow-x-auto">
@@ -379,6 +380,182 @@ function PortfolioGapsTab({ gaps }: { gaps: PortfolioGap[] }) {
   );
 }
 
+// ─── Mention Intelligence types + components ──────────────────────────────────
+
+interface DiscoverySignal {
+  ticker:              string;
+  companyName:         string;
+  mentionCount7d:      number;
+  mentionCount30d:     number;
+  sourceDiversity:     number;
+  positiveMentions:    number;
+  negativeMentions:    number;
+  neutralMentions:     number;
+  sentimentScore:      number;
+  trend:               "Rising" | "Stable" | "Falling";
+  discoveryScore:      number;
+  noveltyScore:        number;
+  sourceBreakdown:     Record<string, number>;
+  isOwned:             boolean;
+  inWatchlist:         boolean;
+}
+
+interface DiscoveryLeaderboard {
+  signals:           DiscoverySignal[];
+  generatedAt:       string;
+  totalTickers:      number;
+  risingCount:       number;
+  crossSourceCount:  number;
+  autoPromotedCount: number;
+}
+
+const TREND_SYMBOL: Record<string, string> = { Rising: "↑", Stable: "→", Falling: "↓" };
+const TREND_COLOR:  Record<string, string> = { Rising: "#15803D", Stable: "#8E8E8E", Falling: "#DC2626" };
+
+const SRC_LABEL: Record<string, string> = {
+  newsletter: "NL", morning_brief: "MB", institutional: "INST",
+};
+
+function sentimentMeta(s: number): { label: string; color: string } {
+  if (s > 0.5)  return { label: "Bullish",  color: "#15803D" };
+  if (s > 0.2)  return { label: "Positive", color: "#2d7d46" };
+  if (s < -0.5) return { label: "Bearish",  color: "#c0392b" };
+  if (s < -0.2) return { label: "Negative", color: "#DC2626" };
+  return { label: "Neutral", color: "#8E8E8E" };
+}
+
+function MentionRow({ sig, rank }: { sig: DiscoverySignal; rank: number }) {
+  const tc = TREND_COLOR[sig.trend] ?? "#8E8E8E";
+  const ts = TREND_SYMBOL[sig.trend] ?? "→";
+  const sm = sentimentMeta(sig.sentimentScore);
+  const scoreColor = sig.discoveryScore >= 70 ? "#15803D" : sig.discoveryScore >= 55 ? "#D97706" : "#5C5E62";
+
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-xl hover:bg-[#F4F4F4] transition-colors">
+      <span className="w-5 text-xs text-[#AAAAAA] font-medium tabular-nums shrink-0">{rank}.</span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-bold text-[#171A20]">{sig.ticker}</span>
+          <span className="text-xs text-[#8E8E8E] truncate max-w-[140px]">{sig.companyName}</span>
+          {sig.isOwned && (
+            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#EEF3FD] text-[#3E6AE1]">Owned</span>
+          )}
+          {sig.inWatchlist && !sig.isOwned && (
+            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#FFFBEB] text-[#D97706]">WL</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+          {Object.entries(sig.sourceBreakdown).map(([src, cnt]) => (
+            <span key={src} className="text-[9px] font-semibold px-1 py-0.5 rounded bg-[#F4F4F4] text-[#5C5E62]"
+              title={`${src}: ${cnt}`}>
+              {SRC_LABEL[src] ?? src.toUpperCase()} {cnt}
+            </span>
+          ))}
+          <span className="text-[10px] text-[#8E8E8E]">{sig.mentionCount30d}/30d</span>
+        </div>
+      </div>
+      <div className="flex flex-col items-end gap-1 shrink-0">
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-bold" style={{ color: tc }}>{ts}</span>
+          <span className="text-xs font-bold tabular-nums" style={{ color: scoreColor }}>{sig.discoveryScore}</span>
+        </div>
+        <span className="text-[10px] font-medium" style={{ color: sm.color }}>{sm.label}</span>
+      </div>
+    </div>
+  );
+}
+
+function MentionSection({
+  title, subtitle, signals, emptyMsg,
+}: { title: string; subtitle: string; signals: DiscoverySignal[]; emptyMsg: string }) {
+  if (signals.length === 0) {
+    return (
+      <div className="bg-white border border-[#EEEEEE] rounded-xl p-5">
+        <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest mb-1">{title}</div>
+        <p className="text-xs text-[#8E8E8E]">{emptyMsg}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="bg-white border border-[#EEEEEE] rounded-xl p-5">
+      <div className="mb-3">
+        <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest">{title}</div>
+        <div className="text-xs text-[#8E8E8E] mt-0.5">{subtitle}</div>
+      </div>
+      <div className="space-y-0.5">
+        {signals.map((s, i) => <MentionRow key={s.ticker} sig={s} rank={i + 1} />)}
+      </div>
+    </div>
+  );
+}
+
+function MentionsTab({ board, loading, onRun, running }: {
+  board:   DiscoveryLeaderboard | null;
+  loading: boolean;
+  onRun:   () => void;
+  running: boolean;
+}) {
+  const signals = board?.signals ?? [];
+  const mostMentioned  = [...signals].sort((a, b) => b.mentionCount30d - a.mentionCount30d).slice(0, 6);
+  const mostPositive   = signals.filter(s => s.sentimentScore > 0.1).sort((a, b) => b.sentimentScore - a.sentimentScore).slice(0, 6);
+  const mostNegative   = signals.filter(s => s.sentimentScore < -0.1).sort((a, b) => a.sentimentScore - b.sentimentScore).slice(0, 6);
+  const fastestRising  = signals.filter(s => s.trend === "Rising").sort((a, b) => b.discoveryScore - a.discoveryScore).slice(0, 6);
+  const crossSource    = signals.filter(s => s.sourceDiversity >= 2).sort((a, b) => b.sourceDiversity - a.sourceDiversity || b.discoveryScore - a.discoveryScore).slice(0, 6);
+
+  return (
+    <div className="p-5 lg:p-6 space-y-4">
+      {/* Stats + run button */}
+      <div className="flex items-center justify-between gap-4 bg-white border border-[#EEEEEE] rounded-xl p-4">
+        {loading ? (
+          <div className="h-6 w-64 bg-[#EEEEEE] rounded animate-pulse" />
+        ) : board ? (
+          <div className="flex flex-wrap gap-5 text-sm">
+            <div><span className="font-semibold text-[#171A20]">{board.totalTickers}</span><span className="text-[#8E8E8E] ml-1.5">tracked</span></div>
+            <div><span className="font-semibold text-[#15803D]">{board.risingCount}</span><span className="text-[#8E8E8E] ml-1.5">rising ↑</span></div>
+            <div><span className="font-semibold text-[#3E6AE1]">{board.crossSourceCount}</span><span className="text-[#8E8E8E] ml-1.5">cross-source</span></div>
+            <div><span className="font-semibold text-[#D97706]">{board.autoPromotedCount}</span><span className="text-[#8E8E8E] ml-1.5">candidates ≥65</span></div>
+            <span className="text-[10px] text-[#AAAAAA] self-center">
+              {new Date(board.generatedAt).toLocaleTimeString()}
+            </span>
+          </div>
+        ) : (
+          <span className="text-sm text-[#8E8E8E]">No mention data yet.</span>
+        )}
+        <button
+          onClick={onRun}
+          disabled={running}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#171A20] text-white hover:bg-[#3E6AE1] transition-colors disabled:opacity-50 shrink-0"
+        >
+          {running ? "Scanning…" : "Build Candidates"}
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="bg-white border border-[#EEEEEE] rounded-xl p-5 space-y-2">
+              {Array.from({ length: 4 }).map((__, j) => <div key={j} className="h-12 bg-[#EEEEEE] rounded animate-pulse" />)}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <MentionSection title="Most Mentioned" subtitle="Highest volume in 30 days" signals={mostMentioned} emptyMsg="Run ticker extraction to populate." />
+            <MentionSection title="Most Positive" subtitle="Strongest bullish signal" signals={mostPositive} emptyMsg="No positive signals yet." />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <MentionSection title="Most Negative" subtitle="Bearish coverage concentration" signals={mostNegative} emptyMsg="No negative signals yet." />
+            <MentionSection title="Fastest Rising" subtitle="7-day vs 30-day acceleration" signals={fastestRising} emptyMsg="No rising trend detected." />
+          </div>
+          <MentionSection title="Cross-Source Consensus" subtitle="Mentioned by 2+ independent source types" signals={crossSource} emptyMsg="No cross-source signals — run more ingestion cycles." />
+          <p className="text-[10px] text-[#AAAAAA]">NL = Newsletter · MB = Morning Brief · INST = Institutional · Score = Discovery Score (0–100) · ↑ Rising · → Stable · ↓ Falling</p>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Summary bar ──────────────────────────────────────────────────────────────
 
 function SummaryBar({ summary, newThisWeek }: {
@@ -427,6 +604,10 @@ export default function DiscoveryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [promoting, setPromoting] = useState<string | null>(null);
+  const [mentionBoard, setMentionBoard]     = useState<DiscoveryLeaderboard | null>(null);
+  const [mentionLoading, setMentionLoading] = useState(false);
+  const [mentionLoaded, setMentionLoaded]   = useState(false);
+  const [mentionRunning, setMentionRunning] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -448,6 +629,28 @@ export default function DiscoveryPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Lazy-load mention board when tab becomes active
+  useEffect(() => {
+    if (tab !== "mentions" || mentionLoaded) return;
+    setMentionLoading(true);
+    fetch("/api/discovery-signals")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.signals) setMentionBoard(d as DiscoveryLeaderboard); })
+      .catch(() => {})
+      .finally(() => { setMentionLoading(false); setMentionLoaded(true); });
+  }, [tab, mentionLoaded]);
+
+  async function handleMentionRun() {
+    setMentionRunning(true);
+    try {
+      await fetch("/api/discovery-signals", { method: "POST" });
+      const r = await fetch("/api/discovery-signals");
+      if (r.ok) setMentionBoard(await r.json() as DiscoveryLeaderboard);
+    } finally {
+      setMentionRunning(false);
+    }
+  }
+
   async function handlePromote(ticker: string) {
     setPromoting(ticker);
     try {
@@ -464,13 +667,14 @@ export default function DiscoveryPage() {
 
   const counts = data
     ? {
-        tierA: data.tierA.length,
-        tierB: data.tierB.length,
-        tierC: data.tierC.length,
-        themes: data.themes.length,
-        gaps: data.portfolioGaps.length,
+        tierA:    data.tierA.length,
+        tierB:    data.tierB.length,
+        tierC:    data.tierC.length,
+        themes:   data.themes.length,
+        gaps:     data.portfolioGaps.length,
+        mentions: mentionBoard?.autoPromotedCount ?? 0,
       }
-    : { tierA: 0, tierB: 0, tierC: 0, themes: 0, gaps: 0 };
+    : { tierA: 0, tierB: 0, tierC: 0, themes: 0, gaps: 0, mentions: mentionBoard?.autoPromotedCount ?? 0 };
 
   return (
     <div className="min-h-screen bg-[#F7F7F7]">
@@ -516,7 +720,16 @@ export default function DiscoveryPage() {
           </div>
         )}
 
-        {data && !loading && (
+        {tab === "mentions" && (
+          <MentionsTab
+            board={mentionBoard}
+            loading={mentionLoading}
+            onRun={handleMentionRun}
+            running={mentionRunning}
+          />
+        )}
+
+        {tab !== "mentions" && data && !loading && (
           <>
             <SummaryBar summary={data.summary} newThisWeek={data.summary.newThisWeek} />
 

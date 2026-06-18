@@ -4,6 +4,8 @@ import { WatchlistButton } from "@/components/watchlist-button";
 import type { ResearchDossierData, FactItem } from "@/app/api/research/route";
 import type { OpportunityEntry, OpportunityResult } from "@/app/api/opportunities/route";
 import type { FMPSearchResult } from "@/lib/fmp-client";
+import type { PeerRow } from "@/app/api/research/[ticker]/peers/route";
+import type { InsiderSummary } from "@/app/api/research/[ticker]/insider/route";
 
 // ─── Strength / severity indicators ──────────────────────────────────────────
 
@@ -221,6 +223,10 @@ function DossierCard({
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [addingToUniverse, setAddingToUniverse] = useState(false);
   const [universeMsg, setUniverseMsg] = useState<string | null>(null);
+  const [peers, setPeers]       = useState<{ sector: string; rows: PeerRow[] } | null>(null);
+  const [peersLoading, setPeersLoading] = useState(false);
+  const [insider, setInsider]   = useState<InsiderSummary | null>(null);
+  const [insiderLoading, setInsiderLoading] = useState(false);
   const scoreColor = d.opportunityScore >= 75 ? "#2d7d46" : d.opportunityScore >= 55 ? "#3E6AE1" : "#D97706";
   const fmtUsd = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 
@@ -288,7 +294,24 @@ function DossierCard({
   return (
     <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
       {/* Header */}
-      <button className="w-full text-left p-4" onClick={() => setExpanded(e => !e)}>
+      <button className="w-full text-left p-4" onClick={() => {
+        const next = !expanded;
+        setExpanded(next);
+        if (next && !peers && !peersLoading) {
+          setPeersLoading(true);
+          fetch(`/api/research/${d.ticker}/peers`)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => { if (data) setPeers(data); })
+            .finally(() => setPeersLoading(false));
+        }
+        if (next && !insider && !insiderLoading) {
+          setInsiderLoading(true);
+          fetch(`/api/research/${d.ticker}/insider`)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => { if (data) setInsider(data); })
+            .finally(() => setInsiderLoading(false));
+        }
+      }}>
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -418,6 +441,203 @@ function DossierCard({
                 </div>
               ))}
             </div>
+          </section>
+
+          {/* Scenario Analysis */}
+          {d.scenarioAnalysis && (
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide">Scenario Analysis</h3>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-[#8E8E8E]">Implied return</span>
+                  <span className="text-xs font-bold" style={{ color: d.scenarioAnalysis.impliedReturn >= 0 ? "#15803D" : "#DC2626" }}>
+                    {d.scenarioAnalysis.impliedReturn > 0 ? "+" : ""}{d.scenarioAnalysis.impliedReturn}%
+                  </span>
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                    style={{
+                      backgroundColor: d.scenarioAnalysis.convictionLevel === "High" ? "#F0FDF4" : d.scenarioAnalysis.convictionLevel === "Medium" ? "#EEF3FD" : "#F4F4F4",
+                      color:           d.scenarioAnalysis.convictionLevel === "High" ? "#15803D" : d.scenarioAnalysis.convictionLevel === "Medium" ? "#3E6AE1"  : "#8E8E8E",
+                    }}>
+                    {d.scenarioAnalysis.convictionLevel}
+                  </span>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {([d.scenarioAnalysis.bull, d.scenarioAnalysis.base, d.scenarioAnalysis.bear] as const).map(sc => {
+                  const isBull = sc.label === "Bull";
+                  const isBear = sc.label === "Bear";
+                  const borderColor = isBull ? "#BBF7D0" : isBear ? "#FECACA" : "#BFDBFE";
+                  const labelColor  = isBull ? "#15803D" : isBear ? "#DC2626" : "#3E6AE1";
+                  const bgColor     = isBull ? "#F0FDF4" : isBear ? "#FEF2F2" : "#EEF3FD";
+                  return (
+                    <div key={sc.label} className="rounded-xl border p-3 flex flex-col gap-1.5"
+                      style={{ borderColor, backgroundColor: bgColor }}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: labelColor }}>{sc.label}</span>
+                        <span className="text-[10px] text-[#8E8E8E]">{sc.probability}%</span>
+                      </div>
+                      <div className="text-base font-bold" style={{ color: labelColor }}>
+                        {sc.returnPct > 0 ? "+" : ""}{sc.returnPct}%
+                      </div>
+                      <p className="text-[11px] text-[#5C5E62] leading-snug">{sc.thesis}</p>
+                      <div className="text-[10px] text-[#8E8E8E] mt-auto pt-1 border-t" style={{ borderColor }}>
+                        <span className="font-medium">Key driver:</span> {sc.keyDriver.slice(0, 60)}{sc.keyDriver.length > 60 ? "…" : ""}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-2 text-[11px] text-[#8E8E8E]">
+                Suggested sizing: <span className="font-medium text-[#5C5E62]">{d.scenarioAnalysis.positionSizing}</span>
+              </div>
+            </section>
+          )}
+
+          {/* Peer Comparison */}
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <h3 className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide">Peer Comparison</h3>
+              {peers?.sector && (
+                <span className="text-[10px] text-[#8E8E8E] bg-[#F4F4F4] px-1.5 py-0.5 rounded">{peers.sector}</span>
+              )}
+            </div>
+            {peersLoading && (
+              <div className="h-24 bg-[#F4F4F4] rounded-xl animate-pulse" />
+            )}
+            {!peersLoading && peers && peers.rows.length <= 1 && (
+              <p className="text-xs text-[#8E8E8E]">No peers found in universe for this sector.</p>
+            )}
+            {!peersLoading && peers && peers.rows.length > 1 && (() => {
+              const metrics: { key: keyof PeerRow; label: string; fmt: (v: number) => string; higherBetter: boolean }[] = [
+                { key: "revenueGrowth",   label: "Rev Growth",  fmt: v => `${v.toFixed(1)}%`,  higherBetter: true  },
+                { key: "grossMargin",     label: "Gross Margin",fmt: v => `${v.toFixed(1)}%`,  higherBetter: true  },
+                { key: "operatingMargin", label: "Op Margin",   fmt: v => `${v.toFixed(1)}%`,  higherBetter: true  },
+                { key: "roic",            label: "ROIC",        fmt: v => `${v.toFixed(1)}%`,  higherBetter: true  },
+                { key: "debtToEquity",    label: "D/E",         fmt: v => v.toFixed(2),        higherBetter: false },
+                { key: "companyScore",    label: "Score",       fmt: v => v.toFixed(0),        higherBetter: true  },
+              ];
+
+              // Precompute best value per metric (for highlighting)
+              const best: Record<string, number> = {};
+              for (const m of metrics) {
+                const vals = peers.rows.map(r => r[m.key] as number | null).filter((v): v is number => v != null);
+                if (vals.length) best[m.key] = m.higherBetter ? Math.max(...vals) : Math.min(...vals);
+              }
+
+              return (
+                <div className="overflow-x-auto -mx-1">
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#EEEEEE]">
+                        <th className="text-left py-1.5 pr-3 text-[#8E8E8E] font-medium w-20">Ticker</th>
+                        {metrics.map(m => (
+                          <th key={m.key as string} className="text-right py-1.5 px-2 text-[#8E8E8E] font-medium whitespace-nowrap">{m.label}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {peers.rows.map(row => (
+                        <tr key={row.ticker}
+                          className="border-b border-[#F4F4F4] last:border-0"
+                          style={{ backgroundColor: row.isSubject ? "#EEF3FD" : undefined }}>
+                          <td className="py-1.5 pr-3 font-semibold" style={{ color: row.isSubject ? "#3E6AE1" : "#171A20" }}>
+                            {row.ticker}
+                          </td>
+                          {metrics.map(m => {
+                            const val = row[m.key] as number | null;
+                            const isBest = val != null && best[m.key] === val;
+                            return (
+                              <td key={m.key as string} className="text-right py-1.5 px-2 tabular-nums"
+                                style={{ color: val == null ? "#AAAAAA" : isBest ? (m.higherBetter ? "#15803D" : "#15803D") : "#5C5E62",
+                                         fontWeight: isBest ? 600 : undefined }}>
+                                {val == null ? "—" : m.fmt(val)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="text-[10px] text-[#AAAAAA] mt-1.5">Best-in-class value highlighted green per metric.</p>
+                </div>
+              );
+            })()}
+          </section>
+
+          {/* Insider Activity */}
+          <section>
+            <h3 className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide mb-3">Insider Activity <span className="font-normal normal-case">(last 90d)</span></h3>
+            {insiderLoading && <div className="h-20 bg-[#F4F4F4] rounded-xl animate-pulse" />}
+            {!insiderLoading && insider && (() => {
+              const SENT_STYLE = {
+                bullish: { bg: "#F0FDF4", text: "#15803D", border: "#BBF7D0" },
+                neutral: { bg: "#F4F4F4", text: "#5C5E62", border: "#E5E5E5" },
+                bearish: { bg: "#FEF2F2", text: "#DC2626", border: "#FECACA" },
+              }[insider.sentiment];
+              const fmtVal = (v: number) => Math.abs(v) >= 1_000_000
+                ? `$${(Math.abs(v) / 1_000_000).toFixed(1)}M`
+                : `$${Math.round(Math.abs(v) / 1000)}K`;
+
+              return (
+                <div className="space-y-3">
+                  {/* Sentiment banner */}
+                  <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg border text-sm"
+                    style={{ backgroundColor: SENT_STYLE.bg, borderColor: SENT_STYLE.border }}>
+                    <span className="font-semibold" style={{ color: SENT_STYLE.text }}>
+                      {insider.sentiment.charAt(0).toUpperCase() + insider.sentiment.slice(1)}
+                    </span>
+                    <span className="text-[#5C5E62] text-xs flex-1">{insider.signal}</span>
+                    {(insider.buyCount > 0 || insider.sellCount > 0) && (
+                      <div className="flex gap-2 shrink-0 text-[11px]">
+                        <span className="text-[#15803D] font-semibold">{insider.buyCount}B</span>
+                        <span className="text-[#DC2626] font-semibold">{insider.sellCount}S</span>
+                        {insider.netValue !== 0 && (
+                          <span style={{ color: insider.netValue >= 0 ? "#15803D" : "#DC2626" }}>
+                            {insider.netValue >= 0 ? "+" : "−"}{fmtVal(insider.netValue)} net
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Transaction list */}
+                  {insider.transactions.filter(t => t.type !== "other").length > 0 && (
+                    <div className="space-y-1">
+                      {insider.transactions.filter(t => t.type !== "other").slice(0, 6).map((tx, i) => {
+                        const isBuy = tx.type === "buy";
+                        return (
+                          <div key={i} className="flex items-center gap-2 text-xs">
+                            <span className="w-12 text-[10px] font-bold shrink-0"
+                              style={{ color: isBuy ? "#15803D" : "#DC2626" }}>
+                              {isBuy ? "BUY" : "SELL"}
+                            </span>
+                            <span className="text-[#171A20] font-medium truncate flex-1">{tx.name}</span>
+                            {tx.title && (
+                              <span className="text-[#AAAAAA] text-[10px] truncate max-w-[100px]">{tx.title}</span>
+                            )}
+                            <span className="text-[#5C5E62] tabular-nums shrink-0">
+                              {tx.shares.toLocaleString()} shs
+                            </span>
+                            {tx.totalValue && (
+                              <span className="text-[#8E8E8E] tabular-nums shrink-0 text-[10px]">
+                                {fmtVal(tx.totalValue)}
+                              </span>
+                            )}
+                            <span className="text-[#AAAAAA] shrink-0 text-[10px]">
+                              {new Date(tx.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {!insider.dataAvailable && (
+                    <p className="text-xs text-[#8E8E8E]">No insider transaction data available from FMP.</p>
+                  )}
+                </div>
+              );
+            })()}
           </section>
 
           {/* Portfolio Fit */}

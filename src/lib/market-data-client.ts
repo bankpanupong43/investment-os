@@ -87,6 +87,32 @@ export async function fetchMarketData(): Promise<MarketDataPoint[]> {
 
 // ─── VIX interpretation ───────────────────────────────────────────────────────
 
+// ─── Equity + FX price fetchers ───────────────────────────────────────────────
+
+export async function fetchEquityPrice(ticker: string): Promise<number | null> {
+  return fetchYahooQuote(ticker);
+}
+
+export async function fetchEquityPrices(tickers: string[]): Promise<Map<string, number>> {
+  const entries = await Promise.allSettled(
+    tickers.map(async t => ({ ticker: t, price: await fetchYahooQuote(t) }))
+  );
+  const map = new Map<string, number>();
+  for (const r of entries) {
+    if (r.status === "fulfilled" && r.value.price != null) {
+      map.set(r.value.ticker, r.value.price);
+    }
+  }
+  return map;
+}
+
+// Yahoo Finance symbol for USD/THB: "THB=X" returns THB per 1 USD
+export async function fetchUSDTHB(): Promise<number | null> {
+  return fetchYahooQuote("THB=X");
+}
+
+// ─── VIX interpretation ───────────────────────────────────────────────────────
+
 export function interpretVIX(vix: number): {
   regime: "risk_on" | "neutral" | "risk_off" | "crisis";
   label: string;

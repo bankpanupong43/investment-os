@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
+import { ALL_BUCKETS, BUCKET_LABELS, BUCKET_MAP, REGIME_TARGETS } from "@/lib/allocation-engine";
 import type { BucketId, AllocationGap, AllocationRecommendation, BucketAllocation, ConcentrationMetric, BucketDriverSummary } from "@/lib/allocation-engine";
 import type { SimulatorResult, ComparisonRow, RegimeMatrixRow, SimulatorMove, SimulationResult } from "@/lib/allocation-simulator";
 
@@ -20,10 +21,11 @@ function Skeleton({ className = "" }: { className?: string }) {
   return <div className={`bg-[#EEEEEE] rounded-xl animate-pulse ${className}`} />;
 }
 
-type TabId = "holdings" | "allocation" | "themes" | "simulator" | "architecture" | "hedge" | "decisions" | "history";
+type TabId = "holdings" | "allocation" | "planner" | "themes" | "simulator" | "architecture" | "hedge" | "decisions" | "history";
 const TABS: { id: TabId; label: string }[] = [
   { id: "holdings",     label: "Holdings" },
   { id: "allocation",   label: "Allocation" },
+  { id: "planner",      label: "Buy Planner" },
   { id: "themes",       label: "Themes" },
   { id: "simulator",    label: "Simulator" },
   { id: "architecture", label: "Architecture" },
@@ -34,57 +36,126 @@ const TABS: { id: TabId; label: string }[] = [
 
 // ─── Holdings tab ─────────────────────────────────────────────────────────────
 
-interface Position {
-  id: string;
+interface HoldingLine {
   ticker: string;
-  name: string;
-  sector: string | null;
-  assetClass: string;
-  status: string;
-  currentValueUsd: number | null;
-  currentValueThb: number | null;
+  shares: number;
+  costBasis: number | null;
+  currency: string;
+  price: number | null;
+  marketValueUsd: number | null;
+  marketValueThb: number | null;
   allocationPct: number | null;
-  unrealizedReturnPct: number | null;
-  costBasisUsd: number | null;
+  gainLossUsd: number | null;
+  gainLossPct: number | null;
   notes: string | null;
 }
 
-const HEALTH_STYLE: Record<string, string> = {
-  intact:     "text-[#2d7d46] bg-[#eef7f1] border-[#c3e6cf]",
-  weakening:  "text-[#b45309] bg-[#fffbeb] border-[#fde68a]",
-  broken:     "text-[#c0392b] bg-[#fdf0ee] border-[#f5c6c1]",
-  monitoring: "text-[#3E6AE1] bg-[#EEF3FD] border-[#bfcffd]",
-};
+interface CashLine {
+  id: string;
+  accountName: string;
+  currency: string;
+  balance: number;
+  balanceThb: number;
+  allocationPct: number | null;
+  notes: string | null;
+}
+
+interface PortfolioSnapshot {
+  usdthb: number;
+  priceDate: string;
+  holdings: HoldingLine[];
+  cashAccounts: CashLine[];
+  totalEquityUsd: number;
+  totalEquityThb: number;
+  totalCashThb: number;
+  totalValueThb: number;
+  totalValueUsd: number;
+}
+
+function fmtThb(n: number | null | undefined): string {
+  if (n == null) return "—";
+  return "฿" + n.toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+interface AddForm { ticker: string; shares: string; costBasis: string; currency: string }
+const EMPTY_ADD: AddForm = { ticker: "", shares: "", costBasis: "", currency: "USD" };
 
 function HoldingsTab() {
-  const [positions, setPositions] = useState<Position[]>([]);
+  const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
+  const [decisionMap, setDecisionMap] = useState<Map<string, DecisionReview>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editingTicker, setEditingTicker] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<{ shares: string; costBasis: string }>({ shares: "", costBasis: "" });
+  const [addForm, setAddForm] = useState<AddForm>(EMPTY_ADD);
+  const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [cashEdits, setCashEdits] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    fetch("/api/positions")
-      .then(r => r.json())
-      .then(d => setPositions(d.positions ?? d ?? []))
-      .catch(e => setError(e.message))
+  function reload() {
+    setLoading(true);
+    Promise.all([
+      fetch("/api/portfolio-value").then(r => r.json()),
+      fetch("/api/decision-review").then(r => r.json()).catch(() => ({ reviews: [] })),
+    ]).then(([pvData, drData]) => {
+      if (pvData.error) throw new Error(pvData.error);
+      setSnapshot(pvData as PortfolioSnapshot);
+      const map = new Map<string, DecisionReview>();
+      for (const dr of (drData.reviews ?? []) as DecisionReview[]) {
+        if (!map.has(dr.ticker)) map.set(dr.ticker, dr);
+      }
+      setDecisionMap(map);
+    }).catch(e => setError(e instanceof Error ? e.message : "Failed to load"))
       .finally(() => setLoading(false));
-  }, []);
+  }
 
-  const active = useMemo(() => positions.filter(p => p.status === "active" && p.ticker !== "CASH"), [positions]);
-  const cash = useMemo(() => positions.find(p => p.ticker === "CASH"), [positions]);
-  const totalUsd = useMemo(() => active.reduce((s, p) => s + (p.currentValueUsd ?? 0), 0) + (cash?.currentValueUsd ?? 0), [active, cash]);
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function saveHolding(ticker: string, shares: number, costBasis: number | null, currency = "USD") {
+    setSaving(true);
+    try {
+      await fetch(`/api/holdings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker, shares, costBasis, currency }),
+      });
+      reload();
+    } finally { setSaving(false); }
+  }
+
+  async function deleteHolding(ticker: string) {
+    if (!confirm(`Remove ${ticker} from holdings?`)) return;
+    await fetch(`/api/holdings/${ticker}`, { method: "DELETE" });
+    reload();
+  }
+
+  async function updateCash(id: string, balance: number) {
+    setSaving(true);
+    try {
+      await fetch("/api/cash-accounts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, balance }),
+      });
+      reload();
+    } finally { setSaving(false); }
+  }
 
   if (loading) return <div className="py-12 text-center text-sm text-[#8E8E8E]">Loading holdings…</div>;
-  if (error) return <div className="text-sm text-[#DC2626] py-4">{error}</div>;
+  if (error)   return <div className="text-sm text-[#DC2626] py-4">{error}</div>;
+  if (!snapshot) return null;
+
+  const { holdings, cashAccounts, totalValueThb, totalValueUsd, totalEquityUsd, totalCashThb, usdthb, priceDate } = snapshot;
 
   return (
     <div className="space-y-4">
       {/* Summary row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: "Portfolio Value", value: fmt(totalUsd) },
-          { label: "Positions", value: active.length.toString() },
-          { label: "Cash", value: fmt(cash?.currentValueUsd) },
-          { label: "Cash %", value: fmtPct(cash?.allocationPct) },
+          { label: "Total (THB)", value: fmtThb(totalValueThb) },
+          { label: "Total (USD)", value: fmt(totalValueUsd) },
+          { label: "USDTHB", value: usdthb.toFixed(2) },
+          { label: "Price Date", value: priceDate },
         ].map(m => (
           <div key={m.label} className="bg-white border border-[#EEEEEE] rounded-xl p-3">
             <div className="text-xs text-[#8E8E8E] mb-1">{m.label}</div>
@@ -95,41 +166,255 @@ function HoldingsTab() {
 
       {/* Holdings table */}
       <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-[#EEEEEE] text-xs text-[#8E8E8E]">
-              <th className="text-left px-4 py-3 font-medium">Ticker</th>
-              <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Sector</th>
-              <th className="text-right px-4 py-3 font-medium">Value</th>
-              <th className="text-right px-4 py-3 font-medium">Alloc %</th>
-              <th className="text-right px-4 py-3 font-medium hidden md:table-cell">Return</th>
-            </tr>
-          </thead>
-          <tbody>
-            {active.map(p => {
-              const ret = p.unrealizedReturnPct;
-              const retColor = ret == null ? "#8E8E8E" : ret >= 0 ? "#15803D" : "#DC2626";
-              return (
-                <tr key={p.id} className="border-b border-[#EEEEEE] last:border-0 hover:bg-[#F4F4F4] transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="font-semibold text-[#171A20]">{p.ticker}</div>
-                    <div className="text-[11px] text-[#8E8E8E] truncate max-w-[120px]">{p.name}</div>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-[#5C5E62] hidden md:table-cell">{p.sector ?? "—"}</td>
-                  <td className="px-4 py-3 text-right font-medium text-[#171A20]">{fmt(p.currentValueUsd)}</td>
-                  <td className="px-4 py-3 text-right text-[#5C5E62]">{fmtPct(p.allocationPct)}</td>
-                  <td className="px-4 py-3 text-right font-medium hidden md:table-cell" style={{ color: retColor }}>
-                    {ret == null ? "—" : (ret >= 0 ? "+" : "") + ret.toFixed(1) + "%"}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[#EEEEEE]">
+          <span className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide">
+            Equity Holdings ({holdings.length})
+          </span>
+          <button
+            onClick={() => setShowAdd(v => !v)}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg text-white"
+            style={{ backgroundColor: "#3E6AE1" }}
+          >
+            {showAdd ? "Cancel" : "+ Add"}
+          </button>
+        </div>
+
+        {/* Add form */}
+        {showAdd && (
+          <div className="px-4 py-3 bg-[#F4F4F4] border-b border-[#EEEEEE] flex flex-wrap gap-2 items-end">
+            {(["ticker", "shares", "costBasis"] as const).map(field => (
+              <div key={field}>
+                <div className="text-[10px] text-[#8E8E8E] mb-1 capitalize">
+                  {field === "costBasis" ? "Cost Basis/share" : field}
+                </div>
+                <input
+                  className="text-sm border border-[#EEEEEE] rounded-lg px-2.5 py-1.5 w-28 focus:outline-none focus:border-[#3E6AE1]"
+                  placeholder={field === "ticker" ? "NVDA" : "0"}
+                  value={addForm[field]}
+                  onChange={e => setAddForm(f => ({ ...f, [field]: e.target.value.toUpperCase() }))}
+                />
+              </div>
+            ))}
+            <div>
+              <div className="text-[10px] text-[#8E8E8E] mb-1">Currency</div>
+              <select
+                className="text-sm border border-[#EEEEEE] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#3E6AE1]"
+                value={addForm.currency}
+                onChange={e => setAddForm(f => ({ ...f, currency: e.target.value }))}
+              >
+                <option value="USD">USD</option>
+                <option value="THB">THB</option>
+              </select>
+            </div>
+            <button
+              disabled={saving || !addForm.ticker || !addForm.shares}
+              onClick={() => {
+                const shares = parseFloat(addForm.shares);
+                const cb = addForm.costBasis ? parseFloat(addForm.costBasis) : null;
+                if (!addForm.ticker || isNaN(shares)) return;
+                saveHolding(addForm.ticker, shares, cb, addForm.currency);
+                setAddForm(EMPTY_ADD);
+                setShowAdd(false);
+              }}
+              className="text-sm font-medium px-4 py-1.5 rounded-lg text-white disabled:opacity-50"
+              style={{ backgroundColor: "#15803D" }}
+            >
+              Save
+            </button>
+          </div>
+        )}
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[#EEEEEE] text-xs text-[#8E8E8E]">
+                <th className="text-left px-4 py-3 font-medium">Ticker</th>
+                <th className="text-right px-4 py-3 font-medium">Shares</th>
+                <th className="text-right px-4 py-3 font-medium">Price</th>
+                <th className="text-right px-4 py-3 font-medium">Mkt Value</th>
+                <th className="text-right px-4 py-3 font-medium">Alloc %</th>
+                <th className="text-right px-4 py-3 font-medium hidden md:table-cell">Gain/Loss</th>
+                <th className="text-right px-4 py-3 font-medium hidden md:table-cell">Ccy</th>
+                <th className="px-4 py-3 font-medium" />
+              </tr>
+            </thead>
+            <tbody>
+              {holdings.map(h => {
+                const dr = decisionMap.get(h.ticker);
+                const vs = dr ? THESIS_VERDICT_STYLE[dr.verdict] ?? THESIS_VERDICT_STYLE["Hold"] : null;
+                const glColor = h.gainLossPct == null ? "#8E8E8E" : h.gainLossPct >= 0 ? "#15803D" : "#DC2626";
+                const isEditing = editingTicker === h.ticker;
+                return (
+                  <tr key={h.ticker} className="border-b border-[#EEEEEE] last:border-0 hover:bg-[#F9F9F9] transition-colors">
+                    <td className="px-4 py-2.5">
+                      <div className="font-semibold text-[#171A20]">{h.ticker}</div>
+                      {vs && (
+                        <span className="mt-0.5 inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                          style={{ backgroundColor: vs.bg, color: vs.text }}>
+                          {dr!.verdict}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-[#5C5E62]">
+                      {isEditing ? (
+                        <input
+                          type="number"
+                          className="w-20 text-right text-sm border border-[#3E6AE1] rounded px-1.5 py-0.5"
+                          value={editForm.shares}
+                          onChange={e => setEditForm(f => ({ ...f, shares: e.target.value }))}
+                        />
+                      ) : h.shares}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-[#5C5E62]">
+                      {h.price != null ? `$${h.price.toFixed(2)}` : "—"}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-medium text-[#171A20] tabular-nums">
+                      {fmt(h.marketValueUsd)}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-[#5C5E62]">
+                      {h.allocationPct != null ? h.allocationPct.toFixed(1) + "%" : "—"}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums font-medium hidden md:table-cell" style={{ color: glColor }}>
+                      {isEditing ? (
+                        <input
+                          type="number"
+                          className="w-20 text-right text-sm border border-[#3E6AE1] rounded px-1.5 py-0.5"
+                          placeholder="cost/share"
+                          value={editForm.costBasis}
+                          onChange={e => setEditForm(f => ({ ...f, costBasis: e.target.value }))}
+                        />
+                      ) : (
+                        h.gainLossPct != null
+                          ? `${h.gainLossPct >= 0 ? "+" : ""}${h.gainLossPct.toFixed(1)}%`
+                          : "—"
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-xs text-[#8E8E8E] hidden md:table-cell">{h.currency}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      {isEditing ? (
+                        <div className="flex items-center gap-1 justify-end">
+                          <button
+                            disabled={saving}
+                            onClick={() => {
+                              const shares = parseFloat(editForm.shares);
+                              const cb = editForm.costBasis ? parseFloat(editForm.costBasis) : null;
+                              if (!isNaN(shares)) saveHolding(h.ticker, shares, cb, h.currency);
+                              setEditingTicker(null);
+                            }}
+                            className="text-[11px] font-medium px-2 py-1 rounded text-white"
+                            style={{ backgroundColor: "#15803D" }}
+                          >Save</button>
+                          <button
+                            onClick={() => setEditingTicker(null)}
+                            className="text-[11px] font-medium px-2 py-1 rounded bg-[#EEEEEE] text-[#5C5E62]"
+                          >✕</button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 justify-end">
+                          <button
+                            onClick={() => {
+                              setEditingTicker(h.ticker);
+                              setEditForm({ shares: String(h.shares), costBasis: String(h.costBasis ?? "") });
+                            }}
+                            className="text-[11px] px-2 py-1 rounded bg-[#EEF3FD] text-[#3E6AE1]"
+                          >Edit</button>
+                          <button
+                            onClick={() => deleteHolding(h.ticker)}
+                            className="text-[11px] px-2 py-1 rounded bg-[#FEF2F2] text-[#DC2626]"
+                          >✕</button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {holdings.length === 0 && (
+          <p className="text-center text-sm text-[#8E8E8E] py-8">
+            No holdings yet. Click "+ Add" to add your first position.
+          </p>
+        )}
       </div>
 
-      {active.length === 0 && (
-        <p className="text-center text-sm text-[#8E8E8E] py-8">No active positions.</p>
+      {/* Cash accounts card */}
+      <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-[#EEEEEE]">
+          <span className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide">
+            Cash Accounts — {fmtThb(totalCashThb)} total
+          </span>
+        </div>
+        <div className="divide-y divide-[#EEEEEE]">
+          {cashAccounts.map(c => {
+            const key = c.id;
+            const isEditingCash = key in cashEdits;
+            return (
+              <div key={c.id} className="px-4 py-3 flex items-center gap-4">
+                <div className="flex-1">
+                  <div className="text-sm font-semibold text-[#171A20]">{c.accountName}</div>
+                  <div className="text-[11px] text-[#8E8E8E]">{c.currency}</div>
+                </div>
+                <div className="text-right">
+                  {isEditingCash ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        className="w-28 text-right text-sm border border-[#3E6AE1] rounded px-2 py-1"
+                        value={cashEdits[key]}
+                        onChange={e => setCashEdits(m => ({ ...m, [key]: e.target.value }))}
+                      />
+                      <button
+                        disabled={saving}
+                        onClick={() => {
+                          const bal = parseFloat(cashEdits[key]);
+                          if (!isNaN(bal)) updateCash(c.id, bal);
+                          setCashEdits(m => { const n = { ...m }; delete n[key]; return n; });
+                        }}
+                        className="text-xs font-medium px-2 py-1 rounded text-white"
+                        style={{ backgroundColor: "#15803D" }}
+                      >Save</button>
+                      <button
+                        onClick={() => setCashEdits(m => { const n = { ...m }; delete n[key]; return n; })}
+                        className="text-xs px-2 py-1 rounded bg-[#EEEEEE] text-[#5C5E62]"
+                      >✕</button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <div className="text-sm font-semibold text-[#171A20] tabular-nums">
+                          {c.currency === "THB" ? fmtThb(c.balance) : fmt(c.balance)}
+                        </div>
+                        {c.currency !== "THB" && (
+                          <div className="text-[11px] text-[#8E8E8E] tabular-nums">{fmtThb(c.balanceThb)}</div>
+                        )}
+                        {c.allocationPct != null && (
+                          <div className="text-[10px] text-[#AAAAAA]">{c.allocationPct.toFixed(1)}% of portfolio</div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setCashEdits(m => ({ ...m, [key]: String(c.balance) }))}
+                        className="text-xs px-2 py-1 rounded bg-[#EEF3FD] text-[#3E6AE1]"
+                      >Edit</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Equity sub-total */}
+      {totalEquityUsd > 0 && (
+        <div className="bg-[#F4F4F4] border border-[#EEEEEE] rounded-xl px-4 py-3 flex items-center justify-between">
+          <span className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide">Equity Sub-total</span>
+          <div className="text-right">
+            <div className="text-sm font-semibold text-[#171A20]">{fmt(totalEquityUsd)} USD</div>
+            <div className="text-[11px] text-[#8E8E8E]">{fmtThb(snapshot.totalEquityThb)} THB</div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -152,16 +437,19 @@ interface AllocationReviewResponse {
   largestOverweight: AllocationGap | null;
   bucketDriverSummaries: BucketDriverSummary[];
   topDriver: string;
+  returnTargetPct: number | null;
+  growthFloor: number;
 }
 
 const BUCKET_COLOR: Record<BucketId, string> = {
-  growth:     "#3E6AE1",
-  healthcare: "#15803D",
-  defense:    "#D97706",
-  gold:       "#B45309",
-  cash:       "#8E8E8E",
-  broad:      "#6D28D9",
-  other:      "#AAAAAA",
+  growth:   "#3E6AE1",
+  midcap:   "#7C3AED",
+  emerging: "#0EA5E9",
+  defense:  "#D97706",
+  gold:     "#B45309",
+  cash:     "#8E8E8E",
+  broad:    "#6D28D9",
+  other:    "#AAAAAA",
 };
 
 const GAP_GRADE_COLOR: Record<string, string> = {
@@ -219,6 +507,7 @@ const DRIVER_SOURCE_STYLE = {
   OPPORTUNITY:   { bg: "#F0FDF4", text: "#15803D", label: "Opportunity" },
   HEDGE:         { bg: "#FFFBEB", text: "#D97706", label: "Hedge" },
   CONCENTRATION: { bg: "#FEF2F2", text: "#DC2626", label: "Concentration" },
+  RETURN_TARGET: { bg: "#F5F0FF", text: "#7C3AED", label: "Return Target" },
 };
 
 function BucketDriverCard({ driver }: { driver: BucketDriverSummary }) {
@@ -227,6 +516,7 @@ function BucketDriverCard({ driver }: { driver: BucketDriverSummary }) {
     { source: "OPPORTUNITY" as const,   adj: driver.opportunityAdjustment,   desc: driver.opportunityDescription },
     { source: "HEDGE" as const,         adj: driver.hedgeAdjustment,         desc: driver.hedgeDescription },
     { source: "CONCENTRATION" as const, adj: driver.concentrationAdjustment, desc: driver.concentrationDescription },
+    { source: "RETURN_TARGET" as const, adj: driver.returnTargetAdjustment ?? 0,  desc: driver.returnTargetDescription ?? "" },
   ] as { source: keyof typeof DRIVER_SOURCE_STYLE; adj: number; desc: string }[]).filter(r => r.adj !== 0);
 
   if (rows.length === 0) return null;
@@ -575,6 +865,8 @@ function AllocationTab() {
   const [data, setData] = useState<AllocationReviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [targetInput, setTargetInput] = useState<string>("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetch("/api/allocation-review")
@@ -583,10 +875,28 @@ function AllocationTab() {
         if (!r.ok) throw new Error(json.error ?? `HTTP ${r.status}`);
         return json as AllocationReviewResponse;
       })
-      .then(d => setData(d))
+      .then(d => {
+        setData(d);
+        setTargetInput(d.returnTargetPct != null ? String(d.returnTargetPct) : "");
+      })
       .catch(e => setError(e instanceof Error ? e.message : "Failed to load allocation"))
       .finally(() => setLoading(false));
   }, []);
+
+  async function saveReturnTarget(value: number | null) {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/allocation-review", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ returnTargetPct: value }),
+      });
+      const updated = await res.json() as AllocationReviewResponse;
+      if (res.ok) setData(updated);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   if (loading) return <div className="py-12 text-center text-sm text-[#8E8E8E]">Loading allocation…</div>;
   if (error) return <div className="text-sm text-[#DC2626] py-4">{error}</div>;
@@ -596,6 +906,61 @@ function AllocationTab() {
 
   return (
     <div className="space-y-4">
+      {/* Return target setting */}
+      <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide mb-0.5">Annual Return Target</div>
+            <div className="text-xs text-[#AAAAAA]">
+              {data.growthFloor > 0
+                ? `Growth floor set to ${data.growthFloor}% — overrides Risk Off template`
+                : "No floor active — regime template used as-is"}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                placeholder="e.g. 25"
+                value={targetInput}
+                onChange={e => setTargetInput(e.target.value)}
+                className="w-24 text-sm border border-[#EEEEEE] rounded-lg px-3 py-1.5 pr-6 text-right focus:outline-none focus:border-[#7C3AED]"
+              />
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-[#AAAAAA]">%</span>
+            </div>
+            <button
+              onClick={() => {
+                const n = parseFloat(targetInput);
+                saveReturnTarget(isNaN(n) ? null : n);
+              }}
+              disabled={saving}
+              className="text-xs font-medium px-3 py-1.5 rounded-lg text-white transition-opacity disabled:opacity-50"
+              style={{ backgroundColor: "#7C3AED" }}
+            >
+              {saving ? "Saving…" : "Apply"}
+            </button>
+            {data.returnTargetPct != null && (
+              <button
+                onClick={() => { setTargetInput(""); saveReturnTarget(null); }}
+                disabled={saving}
+                className="text-xs text-[#8E8E8E] hover:text-[#DC2626] transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+        {data.growthFloor > 0 && (
+          <div className="mt-2 flex items-center gap-2 text-xs text-[#7C3AED]">
+            <span className="font-semibold">Active:</span>
+            <span>Growth floor {data.growthFloor}% from {data.returnTargetPct}% return target</span>
+          </div>
+        )}
+      </div>
+
       {/* Summary row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
@@ -642,7 +1007,8 @@ function AllocationTab() {
       {/* Allocation Drivers */}
       {(data.bucketDriverSummaries ?? []).some(d =>
         d.regimeAdjustment !== 0 || d.opportunityAdjustment !== 0 ||
-        d.hedgeAdjustment !== 0 || d.concentrationAdjustment !== 0
+        d.hedgeAdjustment !== 0 || d.concentrationAdjustment !== 0 ||
+        (d.returnTargetAdjustment ?? 0) !== 0
       ) && (
         <div>
           <div className="flex items-center justify-between mb-2">
@@ -1669,10 +2035,19 @@ interface CashFlowRecord {
   id: string;
   date: string;
   type: "deposit" | "withdrawal";
-  amountUsd: number;
+  amountUsd: number;       // USD equivalent used for performance calculations
+  amountNative: number | null;
+  currency: string;
+  accountName: string | null;
   note: string | null;
   source: string;
 }
+
+const CASH_ACCOUNTS = [
+  { name: "Dime Save", currency: "THB" },
+  { name: "Dime USD",  currency: "USD" },
+  { name: "FCD-USD",   currency: "USD" },
+];
 
 type HistoryTab = "overview" | "charts" | "cashflows";
 const HISTORY_TABS: { id: HistoryTab; label: string }[] = [
@@ -1691,7 +2066,7 @@ function HistoryTab() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), type: "deposit", amountUsd: "", note: "" });
+  const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), type: "deposit", amountNative: "", currency: "USD", accountName: "", note: "" });
   const [showForm, setShowForm] = useState(false);
 
   function loadFlows() {
@@ -1723,12 +2098,12 @@ function HistoryTab() {
       const res = await fetch("/api/cash-flows", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, amountUsd: parseFloat(form.amountUsd) }),
+        body: JSON.stringify({ ...form, amountNative: parseFloat(form.amountNative) }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed");
       await loadFlows();
-      setForm({ date: new Date().toISOString().slice(0, 10), type: "deposit", amountUsd: "", note: "" });
+      setForm({ date: new Date().toISOString().slice(0, 10), type: "deposit", amountNative: "", currency: "USD", accountName: "", note: "" });
       setShowForm(false);
     } catch (e) {
       setFormError(e instanceof Error ? e.message : "Failed to save");
@@ -1939,14 +2314,18 @@ function HistoryTab() {
 
           {/* Add buttons + form */}
           {!showForm ? (
-            <div className="flex gap-2">
-              <button onClick={() => { setForm(f => ({ ...f, type: "deposit" })); setShowForm(true); }}
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => { setForm(f => ({ ...f, type: "deposit", currency: "THB", accountName: "Dime Save" })); setShowForm(true); }}
                 className="px-4 py-2 text-sm font-medium rounded-lg text-white bg-[#15803D] hover:bg-[#166534] transition-colors">
-                + Add Deposit
+                + Deposit THB
               </button>
-              <button onClick={() => { setForm(f => ({ ...f, type: "withdrawal" })); setShowForm(true); }}
+              <button onClick={() => { setForm(f => ({ ...f, type: "deposit", currency: "USD", accountName: "Dime USD" })); setShowForm(true); }}
+                className="px-4 py-2 text-sm font-medium rounded-lg text-white bg-[#3E6AE1] hover:bg-[#2d5bc7] transition-colors">
+                + Deposit USD
+              </button>
+              <button onClick={() => { setForm(f => ({ ...f, type: "withdrawal", currency: "USD", accountName: "" })); setShowForm(true); }}
                 className="px-4 py-2 text-sm font-medium rounded-lg border border-[#DC2626] text-[#DC2626] hover:bg-[#FEF2F2] transition-colors">
-                − Add Withdrawal
+                − Withdrawal
               </button>
             </div>
           ) : (
@@ -1960,10 +2339,35 @@ function HistoryTab() {
                     className="w-full px-3 py-2 text-sm border border-[#EEEEEE] rounded focus:outline-none focus:border-[#3E6AE1]" />
                 </div>
                 <div>
-                  <label className="text-xs text-[#8E8E8E] mb-1 block">Amount (USD)</label>
-                  <input type="number" step="0.01" min="0.01" placeholder="0.00" value={form.amountUsd} required
-                    onChange={e => setForm(f => ({ ...f, amountUsd: e.target.value }))}
+                  <label className="text-xs text-[#8E8E8E] mb-1 block">
+                    Amount ({form.currency})
+                  </label>
+                  <input type="number" step="0.01" min="0.01" placeholder="0.00" value={form.amountNative} required
+                    onChange={e => setForm(f => ({ ...f, amountNative: e.target.value }))}
                     className="w-full px-3 py-2 text-sm border border-[#EEEEEE] rounded focus:outline-none focus:border-[#3E6AE1]" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-[#8E8E8E] mb-1 block">Currency</label>
+                  <select value={form.currency}
+                    onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm border border-[#EEEEEE] rounded focus:outline-none focus:border-[#3E6AE1] bg-white">
+                    <option value="THB">THB</option>
+                    <option value="USD">USD</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-[#8E8E8E] mb-1 block">Account</label>
+                  <select value={form.accountName}
+                    onChange={e => {
+                      const acct = CASH_ACCOUNTS.find(a => a.name === e.target.value);
+                      setForm(f => ({ ...f, accountName: e.target.value, currency: acct?.currency ?? f.currency }));
+                    }}
+                    className="w-full px-3 py-2 text-sm border border-[#EEEEEE] rounded focus:outline-none focus:border-[#3E6AE1] bg-white">
+                    <option value="">— none —</option>
+                    {CASH_ACCOUNTS.map(a => <option key={a.name} value={a.name}>{a.name} ({a.currency})</option>)}
+                  </select>
                 </div>
               </div>
               <div>
@@ -1996,6 +2400,12 @@ function HistoryTab() {
                 {flows.map((f, i) => {
                   const isDeposit = f.type === "deposit";
                   const runningNet = flows.slice(0, i + 1).reduce((s, x) => x.type === "deposit" ? s + x.amountUsd : s - x.amountUsd, 0);
+                  const isThb = (f.currency ?? "USD") === "THB";
+                  const nativeAmt = f.amountNative ?? f.amountUsd;
+                  const displayAmt = isThb
+                    ? `฿${nativeAmt.toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+                    : fmt(nativeAmt);
+                  const showUsdEquiv = isThb;
                   return (
                     <div key={f.id} className="flex gap-4 relative pb-4 last:pb-0">
                       <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center shrink-0 z-10 text-sm font-bold
@@ -2006,14 +2416,20 @@ function HistoryTab() {
                         <div className="flex items-center justify-between gap-2">
                           <div>
                             <span className={`text-sm font-semibold ${isDeposit ? "text-[#15803D]" : "text-[#DC2626]"}`}>
-                              {isDeposit ? "+" : "−"}{fmt(f.amountUsd)}
+                              {isDeposit ? "+" : "−"}{displayAmt}
                             </span>
                             <span className="text-xs text-[#8E8E8E] ml-2 capitalize">{f.type}</span>
+                            {f.accountName && (
+                              <span className="text-xs text-[#8E8E8E] ml-1">· {f.accountName}</span>
+                            )}
                           </div>
                           <span className="text-xs text-[#AAAAAA] shrink-0">
                             {new Date(f.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                           </span>
                         </div>
+                        {showUsdEquiv && (
+                          <div className="text-xs text-[#AAAAAA] mt-0.5">≈ {fmt(f.amountUsd)} USD</div>
+                        )}
                         {f.note && f.note !== f.type && (
                           <div className="text-xs text-[#8E8E8E] mt-0.5 truncate">{f.note}</div>
                         )}
@@ -2027,6 +2443,411 @@ function HistoryTab() {
               </div>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Buy Planner tab ─────────────────────────────────────────────────────────
+
+const PLANNER_BUCKETS = ALL_BUCKETS.filter(b => b !== "other");
+
+function PlannerTab() {
+  const [loading, setLoading] = useState(true);
+  const [portfolioTotal, setPortfolioTotal] = useState(0);
+  const [currentTickerUsd, setCurrentTickerUsd] = useState<Record<string, number>>({});
+  const [currentTickerPrice, setCurrentTickerPrice] = useState<Record<string, number>>({});
+  const [regime, setRegime] = useState("Neutral");
+  const [sliders, setSliders] = useState<Record<BucketId, number>>(
+    () => ({ ...REGIME_TARGETS["Neutral"] }) as Record<BucketId, number>
+  );
+  const [deployInput, setDeployInput] = useState("");
+  const [bucketTickers, setBucketTickers] = useState<Record<BucketId, string[]>>(
+    () => Object.fromEntries(ALL_BUCKETS.map(b => [b, []])) as unknown as Record<BucketId, string[]>
+  );
+  const [tickerInputs, setTickerInputs] = useState<Record<BucketId, string>>(
+    () => Object.fromEntries(ALL_BUCKETS.map(b => [b, ""])) as unknown as Record<BucketId, string>
+  );
+  const [tranchePcts, setTranchePcts] = useState([40, 35, 25]);
+  const [ownedTickers, setOwnedTickers] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/portfolio-value").then(r => r.json()),
+      fetch("/api/allocation-review").then(r => r.json()),
+    ])
+      .then(([pvData, reviewData]) => {
+        const holdings: HoldingLine[] = pvData.holdings ?? [];
+        const total: number = pvData.totalValueUsd ?? 0;
+        setPortfolioTotal(total);
+        setDeployInput(total.toFixed(0));
+
+        const tickerUsd: Record<string, number> = {};
+        const tickerPrice: Record<string, number> = {};
+        const byBucket: Record<BucketId, string[]> =
+          Object.fromEntries(ALL_BUCKETS.map(b => [b, []])) as unknown as Record<BucketId, string[]>;
+        const owned = new Set<string>();
+
+        for (const h of holdings) {
+          tickerUsd[h.ticker] = h.marketValueUsd ?? 0;
+          if (h.price != null) tickerPrice[h.ticker] = h.price;
+          const bucket = (BUCKET_MAP[h.ticker] ?? "other") as BucketId;
+          byBucket[bucket] = [...(byBucket[bucket] ?? []), h.ticker];
+          owned.add(h.ticker);
+        }
+
+        setCurrentTickerUsd(tickerUsd);
+        setCurrentTickerPrice(tickerPrice);
+        setBucketTickers(byBucket);
+        setOwnedTickers(owned);
+
+        if (reviewData?.regime) {
+          const r = reviewData.regime as string;
+          setRegime(r);
+          setSliders({ ...(REGIME_TARGETS[r] ?? REGIME_TARGETS["Neutral"]) } as Record<BucketId, number>);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const totalPct = PLANNER_BUCKETS.reduce((s, b) => s + (sliders[b] ?? 0), 0);
+  const deployAmount = parseFloat(deployInput) || 0;
+  const isBalanced = Math.abs(totalPct - 100) < 0.5;
+  const trancheSum = tranchePcts.reduce((s, v) => s + v, 0);
+  const hasAnyTickers = PLANNER_BUCKETS.some(b => bucketTickers[b].length > 0);
+
+  function loadRegimeTemplate() {
+    setSliders({ ...(REGIME_TARGETS[regime] ?? REGIME_TARGETS["Neutral"]) } as Record<BucketId, number>);
+  }
+
+  function normalize() {
+    if (totalPct === 0) return;
+    const next = { ...sliders } as Record<BucketId, number>;
+    for (const b of PLANNER_BUCKETS) next[b] = Math.round((sliders[b] / totalPct) * 1000) / 10;
+    const adj = Math.round((100 - PLANNER_BUCKETS.reduce((s, b) => s + next[b], 0)) * 10) / 10;
+    if (adj !== 0) {
+      const biggest = PLANNER_BUCKETS.reduce((a, b) => next[a] >= next[b] ? a : b);
+      next[biggest] = Math.round((next[biggest] + adj) * 10) / 10;
+    }
+    setSliders(next);
+  }
+
+  function addTicker(bucket: BucketId) {
+    const t = tickerInputs[bucket].trim().toUpperCase();
+    if (!t || ownedTickers.has(t)) return;
+    setBucketTickers(prev => ({ ...prev, [bucket]: [...prev[bucket].filter(x => x !== t), t] }));
+    setTickerInputs(prev => ({ ...prev, [bucket]: "" }));
+  }
+
+  function removeTicker(bucket: BucketId, ticker: string) {
+    setBucketTickers(prev => ({ ...prev, [bucket]: prev[bucket].filter(t => t !== ticker) }));
+  }
+
+  if (loading) return <div className="py-12 text-center text-sm text-[#8E8E8E]">Loading…</div>;
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm font-semibold text-[#171A20]">Buy Planner</div>
+          <div className="text-xs text-[#8E8E8E] mt-0.5">Set allocation %, pick tickers, get 3-tranche purchase plan</div>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-[#8E8E8E]">Portfolio</div>
+          <div className="text-sm font-semibold text-[#171A20]">{fmt(portfolioTotal)}</div>
+        </div>
+      </div>
+
+      {/* Deploy amount + tranche weights */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+          <label className="text-xs text-[#8E8E8E] block mb-1">Amount to Deploy (USD)</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number" min="0" step="100" value={deployInput}
+              onChange={e => setDeployInput(e.target.value)}
+              className="flex-1 px-3 py-2 text-sm border border-[#EEEEEE] rounded-lg focus:outline-none focus:border-[#3E6AE1]"
+              placeholder="e.g. 10000"
+            />
+            {portfolioTotal > 0 && (
+              <button onClick={() => setDeployInput(portfolioTotal.toFixed(0))}
+                className="text-[10px] px-2 py-1 rounded bg-[#EEF3FD] text-[#3E6AE1] hover:bg-[#DBEAFE] shrink-0">
+                Full
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs text-[#8E8E8E]">Tranche Weights (T1 / T2 / T3)</span>
+            <span className="text-[10px]" style={{ color: trancheSum === 100 ? "#15803D" : "#DC2626" }}>
+              {trancheSum}%{trancheSum !== 100 ? " ≠ 100" : " ✓"}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {[0, 1, 2].map(i => (
+              <div key={i} className="text-center">
+                <div className="text-[10px] text-[#AAAAAA] mb-1">T{i + 1}</div>
+                <input
+                  type="number" min="0" max="100" step="5" value={tranchePcts[i]}
+                  onChange={e => {
+                    const v = Math.max(0, Math.min(100, parseInt(e.target.value) || 0));
+                    setTranchePcts(prev => { const n = [...prev] as [number, number, number]; n[i] = v; return n; });
+                  }}
+                  className="w-full px-2 py-1.5 text-sm border border-[#EEEEEE] rounded text-center focus:outline-none focus:border-[#3E6AE1]"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Allocation sliders */}
+      <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide">Target Allocation</div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold" style={{ color: isBalanced ? "#15803D" : "#DC2626" }}>
+              {totalPct.toFixed(0)}%{!isBalanced ? " ≠ 100" : " ✓"}
+            </span>
+            <button onClick={normalize}
+              className="text-[10px] px-2 py-1 rounded bg-[#F4F4F4] text-[#5C5E62] hover:bg-[#EEEEEE]">
+              Normalize
+            </button>
+            <button onClick={loadRegimeTemplate}
+              className="text-[10px] px-2 py-1 rounded bg-[#EEF3FD] text-[#3E6AE1] hover:bg-[#DBEAFE]">
+              {regime} template
+            </button>
+          </div>
+        </div>
+        <div className="space-y-4">
+          {PLANNER_BUCKETS.map(b => {
+            const pct = sliders[b] ?? 0;
+            const dollars = deployAmount * pct / 100;
+            const color = BUCKET_COLOR[b] ?? "#8E8E8E";
+            return (
+              <div key={b}>
+                <div className="flex items-center gap-3 mb-1.5">
+                  <span className="text-sm font-medium w-32 shrink-0" style={{ color }}>
+                    {BUCKET_LABELS[b]}
+                  </span>
+                  <input
+                    type="range" min="0" max="100" step="1" value={pct}
+                    onChange={e => setSliders(prev => ({ ...prev, [b]: parseFloat(e.target.value) }))}
+                    className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
+                    style={{ accentColor: color }}
+                  />
+                  <div className="flex items-center gap-1 shrink-0">
+                    <input
+                      type="number" min="0" max="100" step="1" value={pct}
+                      onChange={e => {
+                        const v = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                        setSliders(prev => ({ ...prev, [b]: v }));
+                      }}
+                      className="w-12 px-2 py-0.5 text-sm border border-[#EEEEEE] rounded text-right focus:outline-none focus:border-[#3E6AE1]"
+                    />
+                    <span className="text-xs text-[#8E8E8E]">%</span>
+                  </div>
+                  <span className="text-xs text-[#8E8E8E] w-20 text-right shrink-0 tabular-nums">
+                    {deployAmount > 0 ? fmt(dollars) : "—"}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Ticker picks + tranche tables — per-ticker calculation */}
+      <div className="space-y-3">
+        <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide">Ticker Picks &amp; Tranches</div>
+        {PLANNER_BUCKETS.filter(b => (sliders[b] ?? 0) > 0).map(b => {
+          const bucketTarget = deployAmount * (sliders[b] ?? 0) / 100;
+          const tickers = bucketTickers[b];
+          const perTickerTarget = tickers.length > 0 ? bucketTarget / tickers.length : 0;
+          const color = BUCKET_COLOR[b] ?? "#8E8E8E";
+
+          // Per-ticker: target, have, to buy
+          const tickerRows = tickers.map(ticker => {
+            const have = currentTickerUsd[ticker] ?? 0;
+            const toBuy = Math.max(0, perTickerTarget - have);
+            return { ticker, target: perTickerTarget, have, toBuy };
+          });
+          const bucketToBuy = tickerRows.reduce((s, r) => s + r.toBuy, 0);
+
+          return (
+            <div key={b} className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+              {/* Bucket header */}
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-sm font-semibold" style={{ color }}>{BUCKET_LABELS[b]}</span>
+                <span className="text-xs text-[#8E8E8E]">{(sliders[b] ?? 0).toFixed(0)}%</span>
+                {deployAmount > 0 && tickers.length > 0 && (
+                  <span className="text-xs text-[#8E8E8E]">
+                    · Target {fmt(bucketTarget)}
+                    {bucketToBuy > 0
+                      ? <span className="font-semibold ml-1" style={{ color }}> · Buy {fmt(bucketToBuy)}</span>
+                      : <span className="text-[#15803D] font-semibold ml-1"> · Full ✓</span>
+                    }
+                  </span>
+                )}
+              </div>
+
+              {/* Ticker chips */}
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                {tickers.map(t => {
+                  const isOwned = ownedTickers.has(t);
+                  return (
+                    <span key={t} className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full"
+                      style={{ backgroundColor: color + "1A", color }}>
+                      <span style={{ color: isOwned ? "#2d7d46" : undefined, opacity: isOwned ? 1 : 0.5 }}>
+                        {isOwned ? "●" : "○"}
+                      </span>
+                      {t}
+                      {!isOwned && (
+                        <button onClick={() => removeTicker(b, t)} className="hover:opacity-60 leading-none">×</button>
+                      )}
+                    </span>
+                  );
+                })}
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text" placeholder="Add candidate…"
+                    value={tickerInputs[b]}
+                    onChange={e => setTickerInputs(prev => ({ ...prev, [b]: e.target.value.toUpperCase() }))}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addTicker(b); } }}
+                    className="w-28 px-2 py-1 text-xs border border-[#EEEEEE] rounded focus:outline-none focus:border-[#3E6AE1]"
+                  />
+                  <button onClick={() => addTicker(b)}
+                    className="text-xs px-2 py-1 rounded bg-[#F4F4F4] text-[#5C5E62] hover:bg-[#EEEEEE]">
+                    + Add
+                  </button>
+                </div>
+              </div>
+
+              {/* Per-ticker tranche table */}
+              {tickers.length > 0 && deployAmount > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-[#EEEEEE]">
+                        <th className="text-left pb-2 text-[#8E8E8E] font-medium">Ticker</th>
+                        <th className="text-right pb-2 text-[#8E8E8E] font-medium">$/shr</th>
+                        <th className="text-right pb-2 text-[#8E8E8E] font-medium">Target</th>
+                        <th className="text-right pb-2 text-[#8E8E8E] font-medium">Have</th>
+                        <th className="text-right pb-2 text-[#8E8E8E] font-medium">To Buy</th>
+                        {[0, 1, 2].map(i => (
+                          <th key={i} className="text-right pb-2 font-semibold" style={{ color }}>
+                            T{i + 1}
+                            <span className="font-normal text-[#AAAAAA] ml-1">({tranchePcts[i]}%)</span>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tickerRows.map(row => {
+                        const price = currentTickerPrice[row.ticker];
+                        return (
+                        <tr key={row.ticker} className="border-b border-[#F4F4F4] last:border-0">
+                          <td className="py-2 font-semibold text-[#171A20]">{row.ticker}</td>
+                          <td className="py-2 text-right tabular-nums text-[#8E8E8E]">
+                            {price ? `$${price.toFixed(2)}` : "—"}
+                          </td>
+                          <td className="py-2 text-right tabular-nums text-[#8E8E8E]">{fmt(row.target)}</td>
+                          <td className="py-2 text-right tabular-nums text-[#8E8E8E]">
+                            {row.have > 0 ? fmt(row.have) : "—"}
+                          </td>
+                          <td className="py-2 text-right tabular-nums font-semibold"
+                            style={{ color: row.toBuy > 0 ? "#171A20" : "#15803D" }}>
+                            {row.toBuy > 0 ? fmt(row.toBuy) : "Full ✓"}
+                          </td>
+                          {[0, 1, 2].map(i => {
+                            const amt = row.toBuy > 0 && trancheSum > 0
+                              ? row.toBuy * tranchePcts[i] / trancheSum : 0;
+                            const shs = price && amt > 0 ? amt / price : null;
+                            return (
+                              <td key={i} className="py-2 text-right tabular-nums"
+                                style={{ color: amt > 0 ? color : "#AAAAAA" }}>
+                                {amt > 0 ? (
+                                  <span>
+                                    {fmt(amt)}
+                                    {shs !== null && (
+                                      <span className="block text-[10px] text-[#AAAAAA]">
+                                        ~{shs < 1 ? shs.toFixed(2) : shs.toFixed(1)} shs
+                                      </span>
+                                    )}
+                                  </span>
+                                ) : "—"}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                        );
+                      })}
+                      {tickers.length > 1 && (
+                        <tr className="bg-[#F9F9F9]">
+                          <td className="py-1.5 text-[#8E8E8E] font-medium pl-0.5" colSpan={4}>Bucket total</td>
+                          <td className="py-1.5 text-right tabular-nums font-semibold text-[#171A20]">
+                            {fmt(bucketToBuy)}
+                          </td>
+                          {[0, 1, 2].map(i => {
+                            const amt = trancheSum > 0 ? bucketToBuy * tranchePcts[i] / trancheSum : 0;
+                            return (
+                              <td key={i} className="py-1.5 text-right tabular-nums font-semibold" style={{ color }}>
+                                {fmt(amt)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {tickers.length === 0 && (
+                <div className="text-xs text-[#AAAAAA] text-center py-2">No holdings in this bucket — add candidates above</div>
+              )}
+            </div>
+          );
+        })}
+
+        {!PLANNER_BUCKETS.some(b => (sliders[b] ?? 0) > 0) && (
+          <div className="text-center py-6 text-sm text-[#AAAAAA]">Set allocation % above to see bucket sections</div>
+        )}
+      </div>
+
+      {/* Grand summary */}
+      {hasAnyTickers && deployAmount > 0 && trancheSum === 100 && (
+        <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl p-4">
+          <div className="text-xs font-semibold text-[#15803D] uppercase tracking-wide mb-3">Total Deployment</div>
+          {(() => {
+            const grandToBuy = PLANNER_BUCKETS.reduce((s, b) => {
+              const tickers = bucketTickers[b];
+              if (tickers.length === 0) return s;
+              const perTarget = deployAmount * (sliders[b] ?? 0) / 100 / tickers.length;
+              return s + tickers.reduce((ts, t) => ts + Math.max(0, perTarget - (currentTickerUsd[t] ?? 0)), 0);
+            }, 0);
+            return (
+              <>
+                <div className="grid grid-cols-3 gap-3">
+                  {[0, 1, 2].map(i => (
+                    <div key={i} className="bg-white rounded-xl p-3 text-center">
+                      <div className="text-xs text-[#8E8E8E] mb-0.5">T{i + 1}</div>
+                      <div className="text-base font-bold text-[#15803D]">
+                        {fmt(grandToBuy * tranchePcts[i] / 100)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 text-[10px] text-center text-[#15803D]">
+                  Total to buy: <span className="font-semibold">{fmt(grandToBuy)}</span>
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
     </div>
@@ -2067,6 +2888,7 @@ export default function PortfolioPage() {
         <div className="p-4">
           {tab === "holdings"     && <HoldingsTab />}
           {tab === "allocation"   && <AllocationTab />}
+          {tab === "planner"      && <PlannerTab />}
           {tab === "themes"       && <ThemesTab />}
           {tab === "simulator"    && <SimulatorTab />}
           {tab === "architecture" && <ArchitectureTab />}

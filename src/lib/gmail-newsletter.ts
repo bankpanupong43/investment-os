@@ -94,15 +94,39 @@ async function gmailGet(path: string, token: string): Promise<unknown> {
 
 // ─── Main fetch function ──────────────────────────────────────────────────────
 
-export async function fetchRecentNewsletterEmails(): Promise<NewsletterEmail[]> {
+export interface FetchNewsletterOptions {
+  sinceDate?: Date;  // incremental anchor — fetch emails newer than this
+  force?: boolean;   // ignore anchor, fetch last 30 days with higher limit
+}
+
+export async function fetchRecentNewsletterEmails(
+  options: FetchNewsletterOptions = {}
+): Promise<NewsletterEmail[]> {
   if (!isGmailConfigured()) return [];
 
   const token = await getAccessToken();
 
-  // Search for newsletter-like emails from the past 7 days
-  const query = "newer_than:7d";
+  let query: string;
+  let maxResults: number;
+
+  if (options.force) {
+    // Force mode: broad scan of last 30 days, high limit
+    query = "newer_than:30d";
+    maxResults = 500;
+  } else if (options.sinceDate) {
+    // Incremental mode: fetch from sinceDate minus 2-day overlap (timezone safety)
+    const overlapDate = new Date(options.sinceDate.getTime() - 2 * 86400 * 1000);
+    const afterStr = overlapDate.toISOString().slice(0, 10).replace(/-/g, "/");
+    query = `after:${afterStr}`;
+    maxResults = 200;
+  } else {
+    // First-run fallback: last 7 days
+    query = "newer_than:7d";
+    maxResults = 200;
+  }
+
   const searchData = await gmailGet(
-    `/users/me/messages?q=${encodeURIComponent(query)}&maxResults=100`,
+    `/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${maxResults}`,
     token
   ) as { messages?: { id: string }[] } | null;
 

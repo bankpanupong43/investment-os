@@ -1,9 +1,10 @@
 import { db } from "./db";
 import { computeOpportunities } from "./opportunity-engine";
+import { computePortfolioValue } from "./portfolio-value-engine";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type BucketId = "growth" | "healthcare" | "defense" | "gold" | "cash" | "broad" | "other";
+export type BucketId = "growth" | "midcap" | "emerging" | "defense" | "gold" | "cash" | "broad" | "other";
 
 export type DriverSource = "REGIME" | "OPPORTUNITY" | "HEDGE" | "CONCENTRATION";
 
@@ -27,6 +28,8 @@ export interface BucketDriverSummary {
   hedgeDescription: string;
   concentrationAdjustment: number;
   concentrationDescription: string;
+  returnTargetAdjustment: number;
+  returnTargetDescription: string;
   finalAllocation: number;
 }
 
@@ -82,6 +85,8 @@ export interface AllocationReview {
   largestOverweight: AllocationGap | null;
   bucketDriverSummaries: BucketDriverSummary[];
   topDriver: string;
+  returnTargetPct: number | null;
+  growthFloor: number;
 }
 
 // ─── Configuration ────────────────────────────────────────────────────────────
@@ -91,34 +96,35 @@ export const BUCKET_MAP: Record<string, BucketId> = {
   AMZN: "growth", AAPL: "growth", TSM: "growth", ASML: "growth", SMCI: "growth",
   CRWD: "growth", NET: "growth", AMD: "growth", SHOP: "growth", MELI: "growth",
   QCOM: "growth",
-  LLY: "healthcare", NVO: "healthcare", JNJ: "healthcare", UNH: "healthcare",
-  ABBV: "healthcare", MRK: "healthcare",
+  IJH: "midcap", VTWO: "midcap", VO: "midcap", IWM: "midcap", VB: "midcap",
+  VWO: "emerging", EEM: "emerging", INDA: "emerging", VNM: "emerging", EWZ: "emerging",
   ITA: "defense", LMT: "defense", RTX: "defense", NOC: "defense", GD: "defense",
   GLDM: "gold", GLD: "gold", IAU: "gold",
   CASH: "cash", SGOV: "cash", SHY: "cash", TLT: "cash", BND: "cash",
-  VOO: "broad", SPY: "broad", VTI: "broad", QQQ: "broad", IJH: "broad", VTWO: "broad",
+  VOO: "broad", SPY: "broad", VTI: "broad", QQQ: "broad",
 };
 
 export const BUCKET_LABELS: Record<BucketId, string> = {
-  growth:     "Growth Equities",
-  healthcare: "Healthcare",
-  defense:    "Defense",
-  gold:       "Gold / Hedges",
-  cash:       "Cash & Equivalents",
-  broad:      "Broad Market",
-  other:      "Other",
+  growth:   "Growth Equities",
+  midcap:   "Mid/Small-Cap",
+  emerging: "Emerging Markets",
+  defense:  "Defense",
+  gold:     "Gold / Hedges",
+  cash:     "Cash & Equivalents",
+  broad:    "Broad Market",
+  other:    "Other",
 };
 
 // Neutral regime allocation — used as the driver baseline
 export const NEUTRAL_BASE: Record<BucketId, number> = {
-  growth: 40, healthcare: 10, defense: 10, gold: 5, cash: 30, broad: 5, other: 0,
+  growth: 35, midcap: 10, emerging: 10, defense: 5, gold: 5, cash: 25, broad: 10, other: 0,
 };
 
 // Regime-based target templates
 export const REGIME_TARGETS: Record<string, Record<BucketId, number>> = {
-  "Risk On":  { growth: 70, healthcare: 10, defense: 5,  gold: 0,  cash: 15, broad: 0, other: 0 },
-  "Neutral":  { growth: 40, healthcare: 10, defense: 10, gold: 5,  cash: 30, broad: 5, other: 0 },
-  "Risk Off": { growth: 20, healthcare: 15, defense: 10, gold: 10, cash: 45, broad: 0, other: 0 },
+  "Risk On":  { growth: 55, midcap: 15, emerging: 10, defense: 5,  gold: 0,  cash: 5,  broad: 10, other: 0 },
+  "Neutral":  { growth: 35, midcap: 10, emerging: 10, defense: 5,  gold: 5,  cash: 25, broad: 10, other: 0 },
+  "Risk Off": { growth: 20, midcap: 5,  emerging: 5,  defense: 10, gold: 10, cash: 40, broad: 10, other: 0 },
 };
 
 export const REGIME_SCENARIO_NAMES: Record<string, string> = {
@@ -131,8 +137,22 @@ const HEDGE_VERDICT_GOLD_ADJ: Record<string, number> = {
   KEEP: 0, REDUCE: -5, REPLACE: -5, REMOVE: -10,
 };
 
+// Growth floor driven by annual return target
+// Higher return target → higher minimum growth allocation
+function growthFloorFromTarget(returnTargetPct: number): number {
+  if (returnTargetPct >= 30) return 70;
+  if (returnTargetPct >= 25) return 60;
+  if (returnTargetPct >= 20) return 50;
+  if (returnTargetPct >= 15) return 35;
+  if (returnTargetPct >= 10) return 25;
+  return 0;
+}
+
 const MAG7 = new Set(["AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "META", "NVDA"]);
-export const ALL_BUCKETS: BucketId[] = ["growth", "healthcare", "defense", "gold", "cash", "broad", "other"];
+export const ALL_BUCKETS: BucketId[] = ["growth", "midcap", "emerging", "defense", "gold", "cash", "broad", "other"];
+
+// Gaps within ±DRIFT_BAND% are treated as "balanced" — no action needed
+export const DRIFT_BAND = 3;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -155,11 +175,12 @@ export async function generateAllocationReview(
 ): Promise<AllocationReview> {
   const now = new Date();
 
-  const [positions, brief, archReview] = await Promise.all([
-    db.position.findMany({ where: { status: "active" } }),
+  const [snapshot, brief, archReview, portfolioSettings] = await Promise.all([
+    computePortfolioValue(),
     db.morningBrief.findFirst({ orderBy: { briefingDate: "desc" } }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (db as any).portfolioArchitectureReview.findFirst({ orderBy: { reviewDate: "desc" } }).catch(() => null),
+    db.portfolioSettings.findFirst(),
   ]);
 
   let oppEntries = precomputedOpps ?? [] as { ticker: string; objectiveScore: number }[];
@@ -170,34 +191,41 @@ export async function generateAllocationReview(
     } catch { /* best effort */ }
   }
 
-  // ── Current allocation — needed first for concentration drivers ──
+  // ── Current allocation from live PortfolioHolding data ──
   const bucketCurrent: Record<BucketId, { pct: number; tickers: string[] }> = {
-    growth: { pct: 0, tickers: [] }, healthcare: { pct: 0, tickers: [] },
-    defense: { pct: 0, tickers: [] }, gold: { pct: 0, tickers: [] },
-    cash: { pct: 0, tickers: [] }, broad: { pct: 0, tickers: [] }, other: { pct: 0, tickers: [] },
+    growth: { pct: 0, tickers: [] }, midcap: { pct: 0, tickers: [] },
+    emerging: { pct: 0, tickers: [] }, defense: { pct: 0, tickers: [] },
+    gold: { pct: 0, tickers: [] }, cash: { pct: 0, tickers: [] },
+    broad: { pct: 0, tickers: [] }, other: { pct: 0, tickers: [] },
   };
-  const totalValue = positions.reduce((s, p) => s + (p.currentValueUsd ?? 0), 0);
-  for (const pos of positions) {
-    const b = BUCKET_MAP[pos.ticker] ?? "other";
-    const pct = pos.allocationPct ?? (totalValue > 0 ? ((pos.currentValueUsd ?? 0) / totalValue) * 100 : 0);
-    bucketCurrent[b].pct += pct;
-    bucketCurrent[b].tickers.push(pos.ticker);
+
+  for (const h of snapshot.holdings) {
+    const b = BUCKET_MAP[h.ticker] ?? "other";
+    bucketCurrent[b].pct += h.allocationPct ?? 0;
+    bucketCurrent[b].tickers.push(h.ticker);
   }
+  // Cash bucket from CashAccount totals
+  const cashPct = snapshot.totalValueThb > 0 ? (snapshot.totalCashThb / snapshot.totalValueThb) * 100 : 0;
+  bucketCurrent.cash.pct = cashPct;
 
   // Concentration metrics (needed for concentration driver computation)
-  const equityPos = positions
-    .filter(p => p.ticker !== "CASH")
+  const equityPos = [...snapshot.holdings]
     .sort((a, b) => (b.allocationPct ?? 0) - (a.allocationPct ?? 0));
-  const top5Pct = equityPos.slice(0, 5).reduce((s, p) => s + (p.allocationPct ?? 0), 0);
-  const mag7Pct = positions.filter(p => MAG7.has(p.ticker)).reduce((s, p) => s + (p.allocationPct ?? 0), 0);
+  const top5Pct = equityPos.slice(0, 5).reduce((s, h) => s + (h.allocationPct ?? 0), 0);
+  const mag7Pct = equityPos.filter(h => MAG7.has(h.ticker)).reduce((s, h) => s + (h.allocationPct ?? 0), 0);
 
-  const sectorMap: Record<string, number> = {};
-  for (const p of positions) {
-    if (p.ticker === "CASH") continue;
-    const s = p.sector ?? "Unknown";
-    sectorMap[s] = (sectorMap[s] ?? 0) + (p.allocationPct ?? 0);
+  // Sector breakdown — join with Position for display labels
+  const holdingTickers = snapshot.holdings.map(h => h.ticker);
+  const posSectors = holdingTickers.length > 0
+    ? await db.position.findMany({ where: { ticker: { in: holdingTickers } }, select: { ticker: true, sector: true } })
+    : [];
+  const sectorLookup = new Map(posSectors.map(p => [p.ticker, p.sector]));
+  const sectorAgg: Record<string, number> = {};
+  for (const h of snapshot.holdings) {
+    const s = sectorLookup.get(h.ticker) ?? "Unknown";
+    sectorAgg[s] = (sectorAgg[s] ?? 0) + (h.allocationPct ?? 0);
   }
-  const sectorBreakdown = Object.entries(sectorMap)
+  const sectorBreakdown = Object.entries(sectorAgg)
     .sort((a, b) => b[1] - a[1])
     .map(([sector, pct]) => ({ sector, pct: Math.round(pct * 10) / 10 }));
 
@@ -287,6 +315,29 @@ export async function generateAllocationReview(
       `${topPos.ticker} ${(topPos.allocationPct ?? 0).toFixed(0)}% > 20% limit`;
   }
 
+  // Return target overlay — lifts growth floor if return goal requires it
+  const returnTargetPct = portfolioSettings?.returnTargetPct ?? null;
+  const growthFloor = returnTargetPct !== null ? growthFloorFromTarget(returnTargetPct) : 0;
+  const rtAdj: Record<BucketId, number>  = {} as Record<BucketId, number>;
+  const rtDesc: Record<BucketId, string> = {} as Record<BucketId, string>;
+  for (const b of ALL_BUCKETS) { rtAdj[b] = 0; rtDesc[b] = ""; }
+
+  if (growthFloor > 0 && target.growth < growthFloor) {
+    const lift = growthFloor - target.growth;
+    target.growth = growthFloor;
+    rtAdj.growth  = lift;
+    rtDesc.growth = `Return target ${returnTargetPct}% → growth floor ${growthFloor}%`;
+    // Reduce cash first to offset, then broad if needed
+    const cashCut = Math.min(lift, target.cash);
+    target.cash -= cashCut;
+    rtAdj.cash  = -cashCut;
+    if (cashCut < lift) {
+      const broadCut = Math.min(lift - cashCut, target.broad);
+      target.broad -= broadCut;
+      rtAdj.broad  = -broadCut;
+    }
+  }
+
   // Normalize to 100%
   const rawTotal = ALL_BUCKETS.reduce((s, b) => s + (target[b] ?? 0), 0);
   const targetPcts = { ...target } as Record<BucketId, number>;
@@ -310,6 +361,8 @@ export async function generateAllocationReview(
       hedgeDescription: hedgeDesc[b] ?? "",
       concentrationAdjustment: Math.round(concAdj[b] * 10) / 10,
       concentrationDescription: concDesc[b] ?? "",
+      returnTargetAdjustment: Math.round(rtAdj[b] * 10) / 10,
+      returnTargetDescription: rtDesc[b] ?? "",
       finalAllocation: Math.round(targetPcts[b] * 10) / 10,
     }));
 
@@ -318,10 +371,11 @@ export async function generateAllocationReview(
   let maxAbsAdj = 0;
   for (const d of bucketDriverSummaries) {
     const entries: { adj: number; desc: string; label: string }[] = [
-      { adj: d.regimeAdjustment,      desc: d.regimeDescription,       label: d.label },
-      { adj: d.opportunityAdjustment, desc: d.opportunityDescription,  label: d.label },
-      { adj: d.hedgeAdjustment,       desc: d.hedgeDescription,        label: d.label },
+      { adj: d.regimeAdjustment,        desc: d.regimeDescription,        label: d.label },
+      { adj: d.opportunityAdjustment,   desc: d.opportunityDescription,   label: d.label },
+      { adj: d.hedgeAdjustment,         desc: d.hedgeDescription,         label: d.label },
       { adj: d.concentrationAdjustment, desc: d.concentrationDescription, label: d.label },
+      { adj: d.returnTargetAdjustment,  desc: d.returnTargetDescription,  label: d.label },
     ];
     for (const e of entries) {
       if (e.desc && Math.abs(e.adj) > maxAbsAdj) {
@@ -339,7 +393,7 @@ export async function generateAllocationReview(
     return {
       bucket: b, label: BUCKET_LABELS[b],
       currentPct: curr, targetPct: tgt, gapPct: gap,
-      direction: (Math.abs(gap) < 2 ? "balanced" : gap > 0 ? "underweight" : "overweight") as AllocationGap["direction"],
+      direction: (Math.abs(gap) < DRIFT_BAND ? "balanced" : gap > 0 ? "underweight" : "overweight") as AllocationGap["direction"],
       tickers: bucketCurrent[b].tickers,
     };
   }).filter(g => g.currentPct > 0 || g.targetPct > 0);
@@ -356,10 +410,12 @@ export async function generateAllocationReview(
   const recommendations: AllocationRecommendation[] = significantGaps.slice(0, 5).map((gap, i) => {
     const action: "ADD" | "REDUCE" = gap.gapPct > 0 ? "ADD" : "REDUCE";
     const fallbackTickers =
-      gap.bucket === "growth" ? ["NVDA", "AMZN"] :
-      gap.bucket === "gold" ? ["GLDM"] :
-      gap.bucket === "defense" ? ["ITA"] :
-      gap.bucket === "cash" ? ["CASH"] : [];
+      gap.bucket === "growth"   ? ["NVDA", "AMZN"] :
+      gap.bucket === "midcap"   ? ["IJH", "VTWO"] :
+      gap.bucket === "emerging" ? ["VWO", "INDA"] :
+      gap.bucket === "gold"     ? ["GLDM"] :
+      gap.bucket === "defense"  ? ["ITA"] :
+      gap.bucket === "cash"     ? ["CASH"] : [];
     return {
       rank: i + 1, bucket: gap.bucket, action,
       currentPct: gap.currentPct, targetPct: gap.targetPct,
@@ -391,5 +447,7 @@ export async function generateAllocationReview(
     largestUnderweight: underweightGaps[0] ?? null,
     largestOverweight:  overweightGaps[0] ?? null,
     bucketDriverSummaries, topDriver,
+    returnTargetPct,
+    growthFloor,
   };
 }

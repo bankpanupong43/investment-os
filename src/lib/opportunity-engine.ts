@@ -16,6 +16,7 @@
 //             User feedback is explicitly excluded from confidence.
 
 import { db } from "./db";
+import { computePortfolioValue } from "./portfolio-value-engine";
 
 // ─── Output types ─────────────────────────────────────────────────────────────
 
@@ -557,7 +558,7 @@ function buildPreferenceProfile(feedbackSignals: Map<string, string>): Preferenc
 // ─── Main engine ──────────────────────────────────────────────────────────────
 
 export async function computeOpportunities(): Promise<OpportunityResult> {
-  const [universeEntries, positions, watchlistItems, allocationTargets, settings, feedbackSignals] =
+  const [universeEntries, snapshot, watchlistItems, allocationTargets, feedbackSignals] =
     await Promise.all([
       db.universe.findMany({
         where: { status: "active" },
@@ -566,26 +567,29 @@ export async function computeOpportunities(): Promise<OpportunityResult> {
           scores: { orderBy: { scoredAt: "desc" }, take: 1 },
         },
       }),
-      db.position.findMany({ where: { status: "active" } }),
+      computePortfolioValue(),
       db.watchlist.findMany(),
       db.allocationTarget.findMany(),
-      db.portfolioSettings.findFirst(),
       loadFeedbackSignals(),
     ]);
 
-  const totalCapitalUsd = settings?.totalCapitalUsd ?? 0;
-  const cashPos = positions.find(p => p.ticker === "CASH");
-  const availableCashUsd = cashPos?.currentValueUsd ?? 0;
+  const usdthb           = snapshot.usdthb ?? 35;
+  const totalCapitalUsd  = snapshot.totalValueThb / usdthb;
+  const availableCashUsd = snapshot.totalCashThb / usdthb;
 
-  const posMap = new Map(positions.map(p => [p.ticker, p]));
+  // Live holding values keyed by ticker
+  const holdingMap = new Map(snapshot.holdings.map(h => [h.ticker, h]));
   const watchlistSet = new Set(watchlistItems.map(w => w.ticker));
   const targetMap = new Map(allocationTargets.map(t => [t.ticker, t]));
 
+  // Sector exposures from live allocation %; use Universe sector as the label source
+  const univSectorMap = new Map(universeEntries.map(u => [u.ticker, u.sector]));
   const sectorExposures = new Map<string, number>();
-  for (const p of positions) {
-    if (p.ticker === "CASH" || !p.sector) continue;
-    const pct = p.allocationPct ?? 0;
-    if (pct > 0) sectorExposures.set(p.sector, (sectorExposures.get(p.sector) ?? 0) + pct);
+  for (const h of snapshot.holdings) {
+    const sector = univSectorMap.get(h.ticker) ?? null;
+    if (!sector) continue;
+    const pct = h.allocationPct ?? 0;
+    if (pct > 0) sectorExposures.set(sector, (sectorExposures.get(sector) ?? 0) + pct);
   }
 
   const entries: OpportunityEntry[] = [];
@@ -594,14 +598,14 @@ export async function computeOpportunities(): Promise<OpportunityResult> {
     const latestScore = u.scores[0] ?? null;
     const companyScore = r1(latestScore?.totalScore ?? 0);
     const f = u.fundamentals;
-    const position = posMap.get(u.ticker) ?? null;
-    const inPortfolio = position !== null;
+    const holding = holdingMap.get(u.ticker) ?? null;
+    const inPortfolio = holding !== null;
     const inWatchlist = watchlistSet.has(u.ticker);
     const target = targetMap.get(u.ticker) ?? null;
     const userFeedback = feedbackSignals.get(u.ticker) ?? null;
 
     const allocationGapScore = computeAllocationGapScore(
-      inPortfolio, position?.currentValueUsd ?? null, target
+      inPortfolio, holding?.marketValueUsd ?? null, target
     );
     const diversificationScore = computeDiversificationScore(u.sector, u.assetType, sectorExposures);
     const watchlistScore = inWatchlist ? 100 : 0;
@@ -635,7 +639,7 @@ export async function computeOpportunities(): Promise<OpportunityResult> {
       f ? { grossMargin: f.grossMargin, revenueGrowth: f.revenueGrowth, epsGrowth: f.epsGrowth, roic: f.roic, debtToEquity: f.debtToEquity } : null,
       target ? { targetPct: target.targetPct, targetUsd: target.targetUsd, bucket: target.bucket } : null,
       inPortfolio,
-      position?.currentValueUsd ?? null,
+      holding?.marketValueUsd ?? null,
       sectorExposures
     );
 
@@ -686,8 +690,8 @@ export async function computeOpportunities(): Promise<OpportunityResult> {
       allocationTarget: target
         ? { targetPct: target.targetPct, targetUsd: target.targetUsd, bucket: target.bucket, priority: target.priority }
         : null,
-      currentValue: position
-        ? { usd: position.currentValueUsd, allocationPct: position.allocationPct }
+      currentValue: holding
+        ? { usd: holding.marketValueUsd, allocationPct: holding.allocationPct }
         : null,
       reasoning,
       suggestedAllocation,

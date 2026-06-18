@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { computeOpportunities } from "./opportunity-engine";
+import { getActivePortfolioPositions } from "./portfolio-value-engine";
 import { generateAllocationReview, BUCKET_MAP } from "./allocation-engine";
 import { generateThemeAllocationReview } from "./theme-allocation-engine";
 import type { BucketId } from "./allocation-engine";
@@ -46,7 +46,7 @@ export async function generateCioActions(): Promise<CIOActionsResult> {
 
   // ── Load data in parallel ──────────────────────────────────────
   const [positions, decisionReviewsRaw, archReview, brief, sessionsRaw] = await Promise.all([
-    db.position.findMany({ where: { status: "active" } }),
+    getActivePortfolioPositions(),
     db.decisionReview.findMany({ orderBy: { reviewDate: "desc" } }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (db as any).portfolioArchitectureReview.findFirst({ orderBy: { reviewDate: "desc" } }).catch(() => null),
@@ -54,11 +54,27 @@ export async function generateCioActions(): Promise<CIOActionsResult> {
     db.committeeSession.findMany({ orderBy: { createdAt: "desc" }, take: 200 }),
   ]);
 
-  // Opportunity scores — best effort
+  // Opportunity scores — read from cached table (no live recompute)
   let oppEntries: { ticker: string; objectiveScore: number; companyName: string; inPortfolio: boolean }[] = [];
   try {
-    const result = await computeOpportunities();
-    oppEntries = result.entries;
+    const portfolioSet = new Set(positions.map(p => p.ticker));
+    const [oppRows, universeRows] = await Promise.all([
+      db.opportunityScore.findMany({ orderBy: { opportunityScore: "desc" } }),
+      db.universe.findMany({ where: { status: "active" }, select: { ticker: true, companyName: true } }),
+    ]);
+    const nameMap = new Map(universeRows.map(u => [u.ticker, u.companyName]));
+    // Deduplicate to best score per ticker
+    const seen = new Set<string>();
+    for (const row of oppRows) {
+      if (seen.has(row.ticker)) continue;
+      seen.add(row.ticker);
+      oppEntries.push({
+        ticker: row.ticker,
+        objectiveScore: row.opportunityScore,
+        companyName: nameMap.get(row.ticker) ?? row.ticker,
+        inPortfolio: portfolioSet.has(row.ticker),
+      });
+    }
   } catch { /* engine unavailable */ }
 
   // Allocation review — best effort (pass pre-computed opps to avoid double DB call)
