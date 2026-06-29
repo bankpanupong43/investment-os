@@ -1152,6 +1152,8 @@ export function deserializeBlueprint(record: {
       hedge: record.hedgeAllocation,
       cash: record.cashAllocation,
     },
+    dataSources: { macro: [], market: [], portfolio: [] },
+    macroInputs: {},
     concentrationRules: {
       maxPositions: record.maxPositions,
       maxSingleStockPct: record.maxSingleStockPct,
