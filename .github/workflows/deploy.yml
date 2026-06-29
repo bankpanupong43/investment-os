@@ -47,14 +47,12 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "${{ secrets.MINI_PC_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          cat > ~/.ssh/config << EOF
-Host mini-pc
-  HostName ${{ secrets.MINI_PC_SSH_HOST }}
-  User ${{ secrets.MINI_PC_USER }}
-  IdentityFile ~/.ssh/deploy_key
-  ProxyCommand cloudflared access ssh --hostname %h
-  StrictHostKeyChecking no
-EOF
+          echo "Host mini-pc" > ~/.ssh/config
+          echo "  HostName ${{ secrets.MINI_PC_SSH_HOST }}" >> ~/.ssh/config
+          echo "  User ${{ secrets.MINI_PC_USER }}" >> ~/.ssh/config
+          echo "  IdentityFile ~/.ssh/deploy_key" >> ~/.ssh/config
+          echo "  ProxyCommand cloudflared access ssh --hostname %h" >> ~/.ssh/config
+          echo "  StrictHostKeyChecking no" >> ~/.ssh/config
 
       - name: Deploy
         env:
