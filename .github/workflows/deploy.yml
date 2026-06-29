@@ -34,7 +34,6 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: ${{ secrets.MINI_PC_SSH_HOST != '' }}
     steps:
       - name: Install cloudflared
         run: |
