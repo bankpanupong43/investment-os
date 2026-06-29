@@ -47,7 +47,6 @@ export class BaseAgent {
       const response = await this.client.messages.create({
         model: this.config.model ?? DEFAULT_MODEL,
         max_tokens: 8192,
-        thinking: { type: "adaptive" },
         system: this.config.systemPrompt,
         tools: this.config.tools.map((t) => t.definition),
         messages,
