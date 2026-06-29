@@ -34,6 +34,7 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
+    if: ${{ secrets.MINI_PC_SSH_HOST != '' }}
     steps:
       - name: Install cloudflared
         run: |
@@ -44,18 +45,21 @@ jobs:
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.MINI_PC_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.MINI_PC_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          cat >> ~/.ssh/config << 'EOF'
-          Host mini-pc
-            HostName ${{ secrets.MINI_PC_SSH_HOST }}
-            User ${{ secrets.MINI_PC_USER }}
-            IdentityFile ~/.ssh/deploy_key
-            ProxyCommand cloudflared access ssh --hostname %h
-            StrictHostKeyChecking no
-          EOF
+          cat > ~/.ssh/config << EOF
+Host mini-pc
+  HostName ${{ secrets.MINI_PC_SSH_HOST }}
+  User ${{ secrets.MINI_PC_USER }}
+  IdentityFile ~/.ssh/deploy_key
+  ProxyCommand cloudflared access ssh --hostname %h
+  StrictHostKeyChecking no
+EOF
 
       - name: Deploy
+        env:
+          CLOUDFLARE_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CLOUDFLARE_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
           ssh mini-pc "
             cd ~/investment-os &&
