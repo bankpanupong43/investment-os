@@ -58,7 +58,7 @@ export async function GET(
       .sort((a, b) => (b.scores[0]?.totalScore ?? 0) - (a.scores[0]?.totalScore ?? 0))
       .slice(0, 5);
 
-    function toRow(u: typeof subject, isSubject: boolean): PeerRow {
+    function toRow(u: NonNullable<typeof subject>, isSubject: boolean): PeerRow {
       return {
         ticker: u.ticker,
         companyName: u.companyName,
