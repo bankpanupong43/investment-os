@@ -1,0 +1,14 @@
+node_modules
+.next
+.env
+.env.local
+.env.production
+prisma/dev.db
+prisma/*.db
+prisma/migrations
+brain-os
+.git
+.gitignore
+*.md
+npm-debug.log*
+.DS_Store

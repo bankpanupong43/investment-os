@@ -1,10 +1,23 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/Sidebar";
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  themeColor: "#F4F4F4",
+};
 
 export const metadata: Metadata = {
   title: "Investment OS",
   description: "Thesis-driven portfolio management",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Invest OS",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

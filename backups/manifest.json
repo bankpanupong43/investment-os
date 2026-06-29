@@ -390,5 +390,21 @@
     "fileSize": 7190682,
     "checksum": "47ac8f04072df38fbbd7fc6156162d67fe9093023681739acef0f6fcd1d31187",
     "createdAt": "2026-06-18T14:32:25.530Z"
+  },
+  {
+    "id": "cmqz7jw3k00016mwkjwu9a96k",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-06-29-194231",
+    "fileSize": 7214475,
+    "checksum": "e0fafa89356e9180d5cb8ea049944564ee03e7c89666bef9dbf725cb6b943e8e",
+    "createdAt": "2026-06-29T12:42:32.385Z"
+  },
+  {
+    "id": "cmqz7jw7b00026mwk14y90gpn",
+    "backupType": "full_snapshot",
+    "filePath": "backups/full/2026-06-29-194231",
+    "fileSize": 10011202,
+    "checksum": "e6e31a693955933d602c378ad3b5ff5d980ae2f6bacc2a62e6c4beb700476d33",
+    "createdAt": "2026-06-29T12:42:32.519Z"
   }
 ]
