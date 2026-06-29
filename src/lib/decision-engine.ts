@@ -412,14 +412,14 @@ export async function generateDecisionQueue(): Promise<DecisionQueue> {
       where: { status: "active" },
       select: { ticker: true, name: true, allocationPct: true, currentValueUsd: true },
     }),
-    db.cashAccount.findMany({ select: { balanceUsd: true } }),
+    db.cashAccount.findMany({ select: { balance: true } }),
     db.portfolioSettings.findFirst({ select: { totalCapitalUsd: true } }),
     db.morningBrief.findFirst({ orderBy: { briefingDate: "desc" }, select: { marketRegime: true } }),
   ]);
 
   const portfolioTickers = new Set(activePositions.map(p => p.ticker));
   const portfolioTotalUsd = settings?.totalCapitalUsd ?? 0;
-  const availableCashUsd = cashAccounts.reduce((sum, c) => sum + (c.balanceUsd ?? 0), 0);
+  const availableCashUsd = cashAccounts.reduce((sum, c) => sum + (c.balance ?? 0), 0);
   const regime = lastBrief?.marketRegime ?? "Neutral";
 
   // Gather all signals in parallel

@@ -882,12 +882,12 @@ async function buildTradeIdeas(
     const session = await db.committeeSession.findFirst({
       where: { ticker: s.ticker },
       orderBy: { createdAt: "desc" },
-      select: { summary: true },
+      select: { finalDecision: true },
     }).catch(() => null);
     ideas.push({
       action: "BUY",
       ticker: s.ticker,
-      thesis: (session?.summary ?? `Committee Strong Buy on ${s.ticker}.`).slice(0, 130),
+      thesis: (session?.finalDecision ?? `Committee Strong Buy on ${s.ticker}.`).slice(0, 130),
       risk: "No position yet — entry before thesis validated in portfolio context.",
       urgency: "medium",
     });

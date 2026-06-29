@@ -10,7 +10,7 @@ import type {
   RiskAnalysisSection,
   CashAllocationSection,
   WatchlistPrioritizationSection,
-} from "@/app/api/portfolio-review/route";
+} from "@/lib/portfolio-review";
 import type { OpportunityEntry } from "@/app/api/opportunities/route";
 
 // ─── Severity helpers ─────────────────────────────────────────────────────────

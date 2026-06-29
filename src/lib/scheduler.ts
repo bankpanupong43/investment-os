@@ -281,7 +281,7 @@ async function runDossierRefresh(): Promise<JobResult> {
 }
 
 async function runPortfolioReviewRefresh(): Promise<JobResult> {
-  const { generateReview } = await import("@/app/api/portfolio-review/route");
+  const { generateReview } = await import("@/lib/portfolio-review");
   const review = await generateReview(null);
   return {
     success: true,

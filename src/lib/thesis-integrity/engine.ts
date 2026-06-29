@@ -448,7 +448,6 @@ export class ThesisIntegrityEngine {
       const response = await this.client.messages.create({
         model: DEFAULT_MODEL,
         max_tokens: 8192,
-        thinking: { type: "adaptive" },
         system: buildSystemPrompt(),
         tools,
         messages,
@@ -573,8 +572,8 @@ export class ThesisIntegrityEngine {
       evidenceConflicts,
       triggeredKillConditions,
       recommendation,
-      recommendationReasoning: finalVerdict?.recommendationReasoning ?? "Evaluation incomplete.",
-      thesisReference: finalVerdict?.thesisReference ?? "",
+      recommendationReasoning: (finalVerdict as unknown as Record<string, unknown>)?.["recommendationReasoning"] as string ?? "Evaluation incomplete.",
+      thesisReference: (finalVerdict as unknown as Record<string, unknown>)?.["thesisReference"] as string ?? "",
       killConditionOverride: anyKillTriggered && recommendation === "SELL",
       evidenceAudit: audit,
     };

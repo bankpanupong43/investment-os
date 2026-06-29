@@ -56,7 +56,7 @@ const SCREENER_BASE = {
   isEtf:             false,
   isFund:            false,
   excludeSectors:    ["Real Estate", "Utilities"],
-} as const;
+};
 
 // ─── Phase 1: Expand universe metadata ───────────────────────────────────────
 
