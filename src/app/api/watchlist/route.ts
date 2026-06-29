@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
-export type WatchlistStatus = "watching" | "researching" | "high_conviction" | "rejected" | "owned";
+type WatchlistStatus = "watching" | "researching" | "high_conviction" | "rejected" | "owned";
 
-export const WATCHLIST_STATUSES: { value: WatchlistStatus; label: string }[] = [
+const WATCHLIST_STATUSES: { value: WatchlistStatus; label: string }[] = [
   { value: "watching",        label: "Watching" },
   { value: "researching",     label: "Researching" },
   { value: "high_conviction", label: "High Conviction" },
