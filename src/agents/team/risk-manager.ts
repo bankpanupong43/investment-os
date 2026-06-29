@@ -45,7 +45,7 @@ const getPortfolioRiskDataTool: AgentTool = {
     const now = new Date();
 
     return positions.map((p) => {
-      const entryDate = new Date(p.entryDate);
+      const entryDate = p.entryDate ? new Date(p.entryDate) : now;
       const daysHeld = Math.floor((now.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24));
       const holdingPeriodMonths = p.thesis?.holdingPeriodMonths;
       const holdingPeriodDays = holdingPeriodMonths ? holdingPeriodMonths * 30 : null;
