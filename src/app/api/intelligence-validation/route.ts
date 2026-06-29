@@ -6,6 +6,8 @@
 //   - AI-generated content percentage
 //   - Evidence coverage %
 
+export const dynamic = "force-dynamic";
+
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getLatestMacroSnapshots, getLatestMarketSnapshots, getRecentGeoEvents } from "@/lib/macro-ingestion";
