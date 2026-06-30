@@ -501,10 +501,10 @@ async function runMorningBrief(): Promise<JobResult> {
   }
 
   const actionCount = data.recommendedActions.length;
-  const positivePct = data.portfolioImpact.positive.length;
+  const eventCount = data.portfolioImpact.items?.length ?? 0;
   return {
     success: true,
-    summary: `Morning brief generated: ${data.marketRegime} regime. ${actionCount} actions. ${positivePct} positive positions. Brief ID: ${record.id}`,
+    summary: `Morning brief generated: ${data.marketRegime} regime. ${actionCount} actions. ${eventCount} daily events. Brief ID: ${record.id}`,
   };
 }
 

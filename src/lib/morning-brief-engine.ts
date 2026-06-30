@@ -80,11 +80,19 @@ export interface PositionImpact {
   signals: string[];
 }
 
-export interface PortfolioImpact {
-  positive: PositionImpact[];
-  neutral: PositionImpact[];
-  negative: PositionImpact[];
-  summary: string;
+export interface DailyDigestItem {
+  type: "geo" | "filing" | "mention";
+  ticker?: string;
+  headline: string;
+  detail?: string;
+  impact: "positive" | "neutral" | "negative" | "critical";
+  source?: string;
+}
+
+export interface DailyDigest {
+  items: DailyDigestItem[];
+  executeNow: { action: string; ticker?: string; reason: string }[];
+  noActivity: boolean;
 }
 
 export interface RecommendedAction {
@@ -121,7 +129,7 @@ export interface MorningBriefData {
   macroSummary: MacroSummary;
   geopoliticalSummary: GeopoliticalSummary;
   technologySummary: TechnologySummary;
-  portfolioImpact: PortfolioImpact;
+  portfolioImpact: DailyDigest;
   recommendedActions: RecommendedAction[];
   generatedFromSources: {
     positions: number;
@@ -635,80 +643,97 @@ async function buildTechnologySummary(
 
 // ─── Portfolio Impact ─────────────────────────────────────────────────────────
 
-async function buildPortfolioImpact(
-  positions: ActivePosition[],
-  committeeSessions: CommitteeRow[],
-): Promise<PortfolioImpact> {
-  const since30d = new Date(Date.now() - 30 * 86400 * 1000);
-  const recentImpacts = await db.thesisImpactRecord.findMany({
-    where: { createdAt: { gte: since30d } },
-    select: { ticker: true, impactLevel: true, reasoning: true },
-  });
+async function buildDailyDigest(positions: ActivePosition[]): Promise<DailyDigest> {
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const portfolioTickers = new Set(positions.map(p => p.ticker));
 
-  const theses = await db.investmentThesis.findMany({
-    select: { ticker: true, confidenceScore: true, isDraft: true },
-  });
-  const thesisMap = new Map(theses.map(t => [t.ticker, t]));
+  const [impactRecords, geoEvents, mentions] = await Promise.all([
+    db.thesisImpactRecord.findMany({
+      where: { createdAt: { gte: since24h } },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    }),
+    db.geoEvent.findMany({
+      where: { eventDate: { gte: since24h } },
+      orderBy: { eventDate: "desc" },
+      take: 10,
+    }),
+    db.companyMention.findMany({
+      where: {
+        mentionDate: { gte: since24h.toISOString().split("T")[0] },
+        ticker: { in: [...portfolioTickers] },
+      },
+      orderBy: { mentionDate: "desc" },
+      take: 10,
+    }),
+  ]);
 
-  const triggeredKills = await db.killCondition.findMany({
-    where: { status: "triggered" },
-    select: { positionId: true },
-  });
-  const triggeredPositionIds = new Set(triggeredKills.map(k => k.positionId));
+  const items: DailyDigestItem[] = [];
+  const executeNow: DailyDigest["executeNow"] = [];
 
-  const impacts: PositionImpact[] = positions.filter(p => p.ticker !== "CASH").map(pos => {
-    const signals: string[] = [];
-    let impactScore = 0;
+  for (const rec of impactRecords) {
+    const impact: DailyDigestItem["impact"] =
+      rec.impactLevel === "kill_criteria_triggered" ? "critical"
+      : rec.impactLevel === "strengthened" ? "positive"
+      : rec.impactLevel === "weakened" ? "negative"
+      : "neutral";
 
-    const thesis = thesisMap.get(pos.ticker);
-    if (thesis) {
-      if (thesis.confidenceScore >= 8) { signals.push(`thesis confidence ${thesis.confidenceScore}/10`); impactScore += 2; }
-      else if (thesis.confidenceScore >= 6) { signals.push(`thesis confidence ${thesis.confidenceScore}/10`); impactScore += 1; }
-      else if (thesis.confidenceScore < 5) { signals.push(`low conviction ${thesis.confidenceScore}/10`); impactScore -= 2; }
+    items.push({
+      type: "filing",
+      ticker: rec.ticker,
+      headline: `${rec.ticker}: thesis ${rec.impactLevel.replace(/_/g, " ")}`,
+      detail: rec.reasoning?.slice(0, 150) ?? undefined,
+      impact,
+      source: "SEC Filing",
+    });
+
+    if (impact === "critical" && portfolioTickers.has(rec.ticker)) {
+      executeNow.push({
+        action: `Review exit for ${rec.ticker}`,
+        ticker: rec.ticker,
+        reason: `Kill criteria triggered — ${rec.reasoning?.slice(0, 80) ?? "see filing"}`,
+      });
+    } else if (impact === "negative" && portfolioTickers.has(rec.ticker)) {
+      executeNow.push({
+        action: `Monitor ${rec.ticker} — consider reducing`,
+        ticker: rec.ticker,
+        reason: rec.reasoning?.slice(0, 80) ?? "Thesis weakened",
+      });
     }
+  }
 
-    const committee = committeeSessions.find(c => c.ticker === pos.ticker);
-    if (committee) {
-      if (committee.conviction === "Strong Buy") { signals.push("committee: Strong Buy"); impactScore += 3; }
-      else if (committee.conviction === "Buy")   { signals.push("committee: Buy");        impactScore += 2; }
-      else if (committee.conviction === "Watch") { signals.push("committee: Watch");      impactScore += 0; }
-      else if (committee.conviction === "Hold")  { signals.push("committee: Hold");       impactScore -= 1; }
-      else if (committee.conviction === "Pass")  { signals.push("committee: Pass");       impactScore -= 2; }
-    }
+  for (const event of geoEvents) {
+    const sev = (event.severity ?? "").toLowerCase();
+    const impact: DailyDigestItem["impact"] =
+      sev === "critical" ? "critical" : sev === "high" ? "negative" : "neutral";
+    items.push({
+      type: "geo",
+      headline: event.eventTitle,
+      detail: undefined,
+      impact,
+      source: event.region ?? undefined,
+    });
+  }
 
-    const impact = recentImpacts.find(i => i.ticker === pos.ticker);
-    if (impact) {
-      if (impact.impactLevel === "strengthened")          { signals.push("filing strengthened thesis"); impactScore += 2; }
-      else if (impact.impactLevel === "weakened")         { signals.push("filing weakened thesis");     impactScore -= 2; }
-      else if (impact.impactLevel === "kill_criteria_triggered") { signals.push("kill criteria triggered"); impactScore -= 4; }
-      else { signals.push("filing: thesis intact"); impactScore += 1; }
-    } else {
-      signals.push("no recent filing impact");
-    }
+  for (const mention of mentions) {
+    const impact: DailyDigestItem["impact"] =
+      mention.sentiment === "positive" ? "positive"
+      : mention.sentiment === "negative" ? "negative"
+      : "neutral";
+    items.push({
+      type: "mention",
+      ticker: mention.ticker,
+      headline: `${mention.ticker} — ${mention.sourceType} coverage`,
+      detail: mention.context?.slice(0, 120) ?? undefined,
+      impact,
+      source: mention.sourceType,
+    });
+  }
 
-    if (triggeredPositionIds.has(pos.id)) {
-      signals.push("kill condition active");
-      impactScore -= 3;
-    }
+  const order: Record<string, number> = { critical: 0, negative: 1, positive: 2, neutral: 3 };
+  items.sort((a, b) => order[a.impact] - order[b.impact]);
 
-    const impact_ = impactScore >= 2 ? "positive" : impactScore <= -2 ? "negative" : "neutral";
-    const reason = impact_ === "positive"
-      ? "Constructive signals from thesis health and committee analysis"
-      : impact_ === "negative"
-        ? "Bearish signals detected — review recommended"
-        : "Mixed or insufficient signals for strong directional read";
-
-    return { ticker: pos.ticker, name: pos.name, impact: impact_, reason, signals };
-  });
-
-  const positive = impacts.filter(i => i.impact === "positive");
-  const negative = impacts.filter(i => i.impact === "negative");
-  const neutral  = impacts.filter(i => i.impact === "neutral");
-
-  return {
-    positive, neutral, negative,
-    summary: `${positive.length} holding${positive.length !== 1 ? "s" : ""} positive, ${neutral.length} neutral, ${negative.length} ${negative.length !== 1 ? "require" : "requires"} review.`,
-  };
+  return { items, executeNow, noActivity: items.length === 0 };
 }
 
 // ─── Recommended Actions ──────────────────────────────────────────────────────
@@ -842,7 +867,7 @@ function buildTopCall(
   regime: MarketRegime,
   evidence: string[],
   actions: RecommendedAction[],
-  impact: PortfolioImpact,
+  digest: DailyDigest,
 ): string {
   const highUrgency = actions.find(a => a.urgency === "high");
   if (highUrgency) {
@@ -851,17 +876,17 @@ function buildTopCall(
   if (regime === "Risk Off" && evidence.length > 0) {
     return `Risk Off regime active (${evidence[0]}) — reduce growth exposure and protect capital.`;
   }
-  const topNeg = impact.negative[0];
-  if (topNeg) {
-    return `Watch ${topNeg.ticker} — ${topNeg.reason.slice(0, 110)}.`;
+  const topNeg = digest.items.find(i => i.impact === "critical" || i.impact === "negative");
+  if (topNeg?.ticker) {
+    return `Watch ${topNeg.ticker} — ${(topNeg.detail ?? topNeg.headline).slice(0, 110)}.`;
   }
   const mediumUrgency = actions.find(a => a.urgency === "medium");
   if (mediumUrgency) {
     return `${mediumUrgency.action} — ${mediumUrgency.reason.slice(0, 120)}.`;
   }
-  const topPos = impact.positive[0];
-  if (topPos && regime === "Risk On") {
-    return `${regime} regime — ${topPos.ticker} thesis intact. Maintain or add to growth exposure.`;
+  const topPos = digest.items.find(i => i.impact === "positive");
+  if (topPos?.ticker && regime === "Risk On") {
+    return `${regime} regime — ${topPos.ticker} positive signal. Maintain or add to growth exposure.`;
   }
   return "Nothing material overnight — maintain current positioning.";
 }
@@ -1000,7 +1025,7 @@ export async function generateMorningBrief(): Promise<MorningBriefData> {
       buildMacroSummary(positions, macroData),
       buildGeopoliticalSummary(positions, universeTop, geoEvents),
       buildTechnologySummary(positions, committeeRows),
-      buildPortfolioImpact(positions, committeeRows),
+      buildDailyDigest(positions),
       buildRecommendedActions(positions, committeeRows),
     ]);
 

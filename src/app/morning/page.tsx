@@ -5,7 +5,8 @@ import type {
   MacroSummary,
   GeopoliticalSummary,
   TechnologySummary,
-  PortfolioImpact,
+  DailyDigest,
+  DailyDigestItem,
   RecommendedAction,
 } from "@/lib/morning-brief-engine";
 
@@ -18,7 +19,7 @@ interface MorningBriefResponse {
   macroSummary: MacroSummary;
   geopoliticalSummary: GeopoliticalSummary;
   technologySummary: TechnologySummary;
-  portfolioImpact: PortfolioImpact;
+  portfolioImpact: DailyDigest;
   recommendedActions: RecommendedAction[];
   generatedFromSources: Record<string, number>;
   dataSources?: {
@@ -61,6 +62,7 @@ const IMPACT_STYLE: Record<string, { border: string; label: string; labelStyle: 
   positive: { border: "border-l-[#2d7d46]",  label: "Positive", labelStyle: "text-[#2d7d46]" },
   neutral:  { border: "border-l-[#AAAAAA]",  label: "Neutral",  labelStyle: "text-[#8E8E8E]" },
   negative: { border: "border-l-[#c0392b]",  label: "Review",   labelStyle: "text-[#c0392b]" },
+  critical: { border: "border-l-[#7f1d1d]",  label: "Critical", labelStyle: "text-[#7f1d1d]" },
 };
 
 const URGENCY_STYLE: Record<string, string> = {
@@ -243,36 +245,60 @@ function TechnologySection({ tech }: { tech: TechnologySummary }) {
 
 // ─── Portfolio Impact ─────────────────────────────────────────────────────────
 
-function PortfolioImpactSection({ impact }: { impact: PortfolioImpact }) {
-  const all = [
-    ...impact.positive.map(p => ({ ...p, impact: "positive" as const })),
-    ...impact.neutral.map(p => ({ ...p, impact: "neutral" as const })),
-    ...impact.negative.map(p => ({ ...p, impact: "negative" as const })),
-  ];
+const TYPE_LABEL: Record<DailyDigestItem["type"], string> = {
+  filing: "FILING",
+  geo: "GEO",
+  mention: "MENTION",
+};
+
+function DailyDigestSection({ digest }: { digest: DailyDigest }) {
+  if (digest.noActivity) {
+    return (
+      <Section label="Today's Events">
+        <p className="text-sm text-[#8E8E8E] italic">No material events in the last 24 hours.</p>
+      </Section>
+    );
+  }
 
   return (
-    <Section label="Portfolio Impact">
-      <p className="text-sm text-[#5C5E62] mb-4 italic">{impact.summary}</p>
-      <div className="space-y-2">
-        {all.map(pos => {
-          const style = IMPACT_STYLE[pos.impact];
-          return (
-            <div key={pos.ticker} className={`border-l-2 ${style.border} pl-3 py-1`}>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-semibold text-[#171A20]">{pos.ticker}</span>
-                <span className="text-xs text-[#8E8E8E]">{pos.name}</span>
-                <span className={`text-[10px] font-semibold uppercase ${style.labelStyle}`}>{style.label}</span>
+    <>
+      {digest.executeNow.length > 0 && (
+        <Section label="Execute Today">
+          <div className="space-y-2">
+            {digest.executeNow.map((item, i) => (
+              <div key={i} className="flex items-start gap-3 border-l-2 border-[#3E6AE1] pl-3 py-1">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-[#171A20]">{item.action}</p>
+                  <p className="text-xs text-[#8E8E8E] mt-0.5">{item.reason}</p>
+                </div>
+                {item.ticker && (
+                  <span className="text-[10px] px-1.5 py-0.5 bg-[#EEF3FD] text-[#3E6AE1] rounded font-medium shrink-0">{item.ticker}</span>
+                )}
               </div>
-              <div className="flex flex-wrap gap-1.5 mt-1">
-                {pos.signals.map((sig, i) => (
-                  <span key={i} className="text-[10px] px-1.5 py-0.5 bg-[#F4F4F4] text-[#5C5E62] rounded border border-[#EEEEEE]">{sig}</span>
-                ))}
+            ))}
+          </div>
+        </Section>
+      )}
+      <Section label="Today's Events">
+        <div className="space-y-2">
+          {digest.items.map((item, i) => {
+            const style = IMPACT_STYLE[item.impact] ?? IMPACT_STYLE.neutral;
+            return (
+              <div key={i} className={`border-l-2 ${style.border} pl-3 py-1`}>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-[#F4F4F4] text-[#5C5E62] rounded">{TYPE_LABEL[item.type]}</span>
+                  {item.ticker && <span className="text-xs font-semibold text-[#3E6AE1]">{item.ticker}</span>}
+                  <span className="text-sm text-[#171A20]">{item.headline}</span>
+                  <span className={`text-[10px] font-semibold uppercase ${style.labelStyle}`}>{style.label}</span>
+                </div>
+                {item.detail && <p className="text-xs text-[#8E8E8E] mt-0.5">{item.detail}</p>}
+                {item.source && <p className="text-[10px] text-[#AAAAAA] mt-0.5">{item.source}</p>}
               </div>
-            </div>
-          );
-        })}
-      </div>
-    </Section>
+            );
+          })}
+        </div>
+      </Section>
+    </>
   );
 }
 
@@ -447,7 +473,7 @@ export default function MorningPage() {
       <TechnologySection tech={brief.technologySummary} />
 
       {/* Portfolio Impact */}
-      <PortfolioImpactSection impact={brief.portfolioImpact} />
+      <DailyDigestSection digest={brief.portfolioImpact} />
 
       {/* Recommended Actions */}
       <ActionsSection actions={brief.recommendedActions} />
