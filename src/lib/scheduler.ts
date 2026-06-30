@@ -260,7 +260,7 @@ async function runDossierRefresh(): Promise<JobResult> {
     db.watchlist.findMany({ select: { ticker: true } }),
   ]);
 
-  const tickers = [...new Set([...positions.map(p => p.ticker), ...watchlist.map(w => w.ticker)])].slice(0, 10);
+  const tickers = [...new Set([...positions.map(p => p.ticker), ...watchlist.map(w => w.ticker)])];
   let generated = 0;
   const errors: string[] = [];
 
