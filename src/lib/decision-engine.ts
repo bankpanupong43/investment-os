@@ -68,7 +68,7 @@ const TYPE_RANK: Record<ActionType, number> = {
 
 // ─── Signal gatherers ─────────────────────────────────────────────────────────
 
-async function gatherExitSignals(): Promise<ActionItem[]> {
+async function gatherExitSignals(portfolioTickers: Set<string>): Promise<ActionItem[]> {
   const items: ActionItem[] = [];
 
   // Triggered kill conditions
@@ -133,6 +133,7 @@ async function gatherExitSignals(): Promise<ActionItem[]> {
 
   const filingKillTickers = new Set(items.map(i => i.ticker));
   for (const rec of recentKillFilings) {
+    if (!portfolioTickers.has(rec.ticker)) continue;
     if (filingKillTickers.has(rec.ticker)) continue;
     filingKillTickers.add(rec.ticker);
 
@@ -341,7 +342,7 @@ async function gatherResearchSignals(): Promise<ActionItem[]> {
   return items;
 }
 
-async function gatherMonitorSignals(): Promise<ActionItem[]> {
+async function gatherMonitorSignals(portfolioTickers: Set<string>): Promise<ActionItem[]> {
   const items: ActionItem[] = [];
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
@@ -357,6 +358,7 @@ async function gatherMonitorSignals(): Promise<ActionItem[]> {
 
   const monitoredTickers = new Set<string>();
   for (const impact of weakenedImpacts.slice(0, 3)) {
+    if (!portfolioTickers.has(impact.ticker)) continue;
     if (monitoredTickers.has(impact.ticker)) continue;
     monitoredTickers.add(impact.ticker);
     items.push({
@@ -424,12 +426,12 @@ export async function generateDecisionQueue(): Promise<DecisionQueue> {
 
   // Gather all signals in parallel
   const [exits, deploys, trims, rebalances, research, monitors] = await Promise.all([
-    gatherExitSignals(),
+    gatherExitSignals(portfolioTickers),
     gatherDeploySignals(portfolioTickers, availableCashUsd),
     gatherTrimSignals(activePositions),
     gatherRebalanceSignals(portfolioTotalUsd),
     gatherResearchSignals(),
-    gatherMonitorSignals(),
+    gatherMonitorSignals(portfolioTickers),
   ]);
 
   // Suppress underweight REBALANCE items whose bucket is already covered by a DEPLOY signal.
