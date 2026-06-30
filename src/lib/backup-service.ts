@@ -257,41 +257,35 @@ export async function backupBrainOs(label?: string): Promise<BackupResult> {
 // ─── Full snapshot ────────────────────────────────────────────────────────────
 
 export async function backupFull(label?: string): Promise<BackupResult> {
-  if (!fs.existsSync(DB_PATH)) throw new Error(`Database not found: ${DB_PATH}`);
-
   ensureDir(FULL_BACKUP_DIR);
   const ts = timestamp();
   const snapshotDir = path.join(FULL_BACKUP_DIR, ts);
   ensureDir(snapshotDir);
 
-  // 1. Copy database
-  const dbDest = path.join(snapshotDir, "dev.db");
-  fs.copyFileSync(DB_PATH, dbDest);
-  const dbChecksum = sha256File(dbDest);
+  // DB is Supabase PostgreSQL — backups managed by Supabase, skip local copy
 
-  // 2. Brain OS snapshot
+  // 1. Brain OS snapshot
   const brainResult = await backupBrainOs(label);
 
-  // 3. Metadata report
+  // 2. Metadata report
   const meta = {
     label: label ?? ts,
     ts,
     createdAt: new Date().toISOString(),
-    database: { path: relPath(dbDest), size: fs.statSync(dbDest).size, checksum: dbChecksum },
+    database: { note: "Supabase PostgreSQL — backups managed by Supabase" },
     brainOs: brainResult,
   };
-  fs.writeFileSync(path.join(snapshotDir, "metadata.json"), JSON.stringify(meta, null, 2), "utf-8");
-
-  const stats = fs.statSync(dbDest);
-  const totalSize = stats.size + (fs.existsSync(path.join(snapshotDir, "metadata.json"))
-    ? fs.statSync(path.join(snapshotDir, "metadata.json")).size : 0);
+  const metaPath = path.join(snapshotDir, "metadata.json");
+  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf-8");
+  const totalSize = fs.statSync(metaPath).size;
+  const checksum = sha256File(metaPath);
 
   const saved = await db.backup.create({
     data: {
       backupType: "full_snapshot",
       filePath: relPath(snapshotDir),
       fileSize: totalSize,
-      checksum: dbChecksum,
+      checksum,
       metadata: JSON.stringify(meta),
     },
   });
@@ -301,12 +295,10 @@ export async function backupFull(label?: string): Promise<BackupResult> {
     backupType: "full_snapshot",
     filePath: relPath(snapshotDir),
     fileSize: totalSize,
-    checksum: dbChecksum,
+    checksum,
     createdAt: saved.createdAt.toISOString(),
   };
   appendManifest(entry);
-
-  // Cleanup full backups
   await cleanupFullBackups();
 
   return { ...entry, createdAt: saved.createdAt.toISOString() };
