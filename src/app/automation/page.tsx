@@ -6,7 +6,8 @@ const JOB_LABELS: Record<string, string> = {
   integrity_check: "Integrity Check",
   macro_ingestion: "Macro Intelligence Ingestion",
   sec_filing_refresh: "SEC Filing Refresh",
-  earnings_refresh: "Earnings Refresh",
+  earnings_ingestion: "Earnings Ingestion",
+  thesis_impact_refresh: "Thesis Impact Refresh",
   fmp_refresh: "FMP Fundamentals Refresh",
   universe_rescore: "Universe Rescore",
   opportunity_refresh: "Opportunity Refresh",
@@ -30,6 +31,10 @@ interface JobRecord {
   durationMs: number | null;
   resultSummary: string | null;
   errorMessage: string | null;
+  runId: string | null;
+  resultDetail: unknown;
+  errorStack: string | null;
+  errorCategory: string | null;
 }
 
 interface ScheduleStatus {
@@ -38,6 +43,12 @@ interface ScheduleStatus {
   nextRunAt: string;
   runningJob: string | null;
   recentJobs: JobRecord[];
+  overallHealth: "passed" | "partial" | "failed" | "unknown";
+  failedJobs: number;
+  successRate: number | null;
+  lastFailureAt: string | null;
+  runningJobs: string[];
+  recentErrors: { jobName: string; errorMessage: string | null }[];
 }
 
 interface AutomationData {
@@ -71,14 +82,68 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+interface IntegrityIssue {
+  check: string;
+  severity: "error" | "warning" | "info";
+  message: string;
+  affectedIds?: string[];
+}
+
+interface IntegrityJobDetail {
+  errors: IntegrityIssue[];
+  warnings: IntegrityIssue[];
+  infos: IntegrityIssue[];
+}
+
+function isIntegrityDetail(detail: unknown): detail is IntegrityJobDetail {
+  if (!detail || typeof detail !== "object") return false;
+  const d = detail as Record<string, unknown>;
+  return Array.isArray(d.errors) && Array.isArray(d.warnings) && Array.isArray(d.infos);
+}
+
+function SeverityBadge({ severity }: { severity: IntegrityIssue["severity"] }) {
+  const cls = severity === "error"
+    ? "bg-red-100 text-red-700"
+    : severity === "warning"
+    ? "bg-amber-100 text-amber-700"
+    : "bg-blue-100 text-blue-600";
+  return (
+    <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${cls}`}>
+      {severity}
+    </span>
+  );
+}
+
+function IntegrityDetail({ detail }: { detail: IntegrityJobDetail }) {
+  const all = [...detail.errors, ...detail.warnings, ...detail.infos];
+  if (all.length === 0) {
+    return <div className="text-xs text-[#8E8E8E]">All checks passed — no issues.</div>;
+  }
+  return (
+    <div className="space-y-1.5">
+      {all.map((issue, i) => (
+        <div key={i} className="flex items-start gap-2 text-xs">
+          <SeverityBadge severity={issue.severity} />
+          <div>
+            <span className="text-[#171A20] font-medium">{issue.check}</span>
+            <span className="text-[#8E8E8E]"> — {issue.message}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function AutomationPage() {
   const [data, setData] = useState<AutomationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [runningNightly, setRunningNightly] = useState(false);
   const [runningJob, setRunningJob] = useState<string | null>(null);
+  const [retryingJob, setRetryingJob] = useState<string | null>(null);
   const [sendingTestEmail, setSendingTestEmail] = useState(false);
   const [msg, setMsg] = useState("");
   const [activeTab, setActiveTab] = useState<"overview" | "history" | "jobs">("overview");
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const d = await fetch("/api/automation").then(r => r.json()).catch(() => null);
@@ -90,10 +155,10 @@ export default function AutomationPage() {
 
   // Poll while nightly run or individual job is in progress
   useEffect(() => {
-    if (!runningNightly && !runningJob) return;
+    if (!runningNightly && !runningJob && !retryingJob) return;
     const interval = setInterval(load, 3000);
     return () => clearInterval(interval);
-  }, [runningNightly, runningJob, load]);
+  }, [runningNightly, runningJob, retryingJob, load]);
 
   async function triggerNightly() {
     setRunningNightly(true);
@@ -160,7 +225,7 @@ export default function AutomationPage() {
   }
 
   async function retryJob(jobName: string) {
-    setRunningJob(jobName);
+    setRetryingJob(jobName);
     setMsg(`Retrying ${JOB_LABELS[jobName] ?? jobName}…`);
     try {
       const res = await fetch(`/api/automation/${jobName}`, {
@@ -170,19 +235,18 @@ export default function AutomationPage() {
       });
       const result = await res.json();
       if (res.ok) {
-        setMsg(`Retry complete: ${result.resultSummary ?? result.message ?? ""}`);
+        setMsg(`Retry complete: ${result.resultSummary ?? ""}`);
       } else {
-        setMsg(`Error: ${result.error}`);
+        setMsg(`Error: ${result.error ?? "Retry failed"}`);
       }
       await load();
     } finally {
-      setRunningJob(null);
+      setRetryingJob(null);
     }
   }
 
   const status = data?.status;
   const history = data?.history ?? [];
-  const failures = history.filter(j => j.status === "failed");
 
   // Group history by jobName for per-job last-run display
   const lastByJob: Record<string, JobRecord> = {};
@@ -190,7 +254,20 @@ export default function AutomationPage() {
     if (!lastByJob[j.jobName]) lastByJob[j.jobName] = j;
   }
 
-  const isAnyRunning = runningNightly || !!runningJob || sendingTestEmail;
+  const isAnyRunning = runningNightly || !!runningJob || !!retryingJob || sendingTestEmail;
+
+  const healthColor: Record<ScheduleStatus["overallHealth"], string> = {
+    passed: "text-green-600",
+    partial: "text-amber-600",
+    failed: "text-red-600",
+    unknown: "text-[#8E8E8E]",
+  };
+  const healthLabel: Record<ScheduleStatus["overallHealth"], string> = {
+    passed: "Passed",
+    partial: "Partial failure",
+    failed: "Failed",
+    unknown: "—",
+  };
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
@@ -238,6 +315,28 @@ export default function AutomationPage() {
           {/* Schedule status bar */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="bg-white border border-[#EEEEEE] rounded-lg p-4">
+              <div className="text-xs text-[#8E8E8E] mb-1">Overall Health</div>
+              <div className={`text-sm font-semibold ${healthColor[status?.overallHealth ?? "unknown"]}`}>
+                {healthLabel[status?.overallHealth ?? "unknown"]}
+              </div>
+            </div>
+            <div className="bg-white border border-[#EEEEEE] rounded-lg p-4">
+              <div className="text-xs text-[#8E8E8E] mb-1">Failed Jobs (last 50)</div>
+              <div className={`text-sm font-semibold ${(status?.failedJobs ?? 0) > 0 ? "text-red-600" : "text-[#171A20]"}`}>
+                {status?.failedJobs ?? 0}
+              </div>
+            </div>
+            <div className="bg-white border border-[#EEEEEE] rounded-lg p-4">
+              <div className="text-xs text-[#8E8E8E] mb-1">Success Rate</div>
+              <div className="text-sm font-semibold text-[#171A20]">
+                {status?.successRate == null ? "—" : `${status.successRate}%`}
+              </div>
+            </div>
+            <div className="bg-white border border-[#EEEEEE] rounded-lg p-4">
+              <div className="text-xs text-[#8E8E8E] mb-1">Last Failure</div>
+              <div className="text-sm font-semibold text-[#171A20]">{fmt(status?.lastFailureAt ?? null)}</div>
+            </div>
+            <div className="bg-white border border-[#EEEEEE] rounded-lg p-4">
               <div className="text-xs text-[#8E8E8E] mb-1">Next Run</div>
               <div className="text-sm font-semibold text-[#171A20]">{fmt(status?.nextRunAt ?? null)}</div>
             </div>
@@ -245,39 +344,32 @@ export default function AutomationPage() {
               <div className="text-xs text-[#8E8E8E] mb-1">Last Run</div>
               <div className="text-sm font-semibold text-[#171A20]">{fmt(status?.lastRunAt ?? null)}</div>
             </div>
-            <div className="bg-white border border-[#EEEEEE] rounded-lg p-4">
-              <div className="text-xs text-[#8E8E8E] mb-1">Last Status</div>
-              <div className="text-sm font-semibold">
-                {status?.lastRunSuccessful == null ? "—" :
-                  status.lastRunSuccessful
-                    ? <span className="text-green-600">Passed</span>
-                    : <span className="text-red-600">Failures</span>}
-              </div>
-            </div>
-            <div className="bg-white border border-[#EEEEEE] rounded-lg p-4">
-              <div className="text-xs text-[#8E8E8E] mb-1">Currently Running</div>
+            <div className="bg-white border border-[#EEEEEE] rounded-lg p-4 col-span-2">
+              <div className="text-xs text-[#8E8E8E] mb-1">Running Jobs</div>
               <div className="text-sm font-semibold text-[#171A20]">
-                {status?.runningJob ? JOB_LABELS[status.runningJob] ?? status.runningJob : "—"}
+                {status?.runningJobs && status.runningJobs.length > 0
+                  ? status.runningJobs.map(j => JOB_LABELS[j] ?? j).join(", ")
+                  : "—"}
               </div>
             </div>
           </div>
 
-          {/* Failures alert */}
-          {failures.length > 0 && (
+          {/* Recent errors */}
+          {(status?.recentErrors?.length ?? 0) > 0 && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
               <div className="text-sm font-medium text-red-700 mb-2">
-                {failures.length} recent job failure{failures.length > 1 ? "s" : ""}
+                {status!.recentErrors.length} recent job failure{status!.recentErrors.length > 1 ? "s" : ""}
               </div>
               <div className="space-y-1">
-                {failures.slice(0, 5).map(f => (
-                  <div key={f.id} className="flex items-center justify-between text-xs text-red-600">
-                    <span>{JOB_LABELS[f.jobName] ?? f.jobName} — {f.errorMessage ?? f.resultSummary}</span>
+                {status!.recentErrors.map((f, i) => (
+                  <div key={`${f.jobName}-${i}`} className="flex items-center justify-between text-xs text-red-600">
+                    <span>{JOB_LABELS[f.jobName] ?? f.jobName} — {f.errorMessage ?? "unknown error"}</span>
                     <button
                       onClick={() => retryJob(f.jobName)}
                       disabled={isAnyRunning}
                       className="ml-2 px-2 py-0.5 border border-red-300 rounded hover:bg-red-100 disabled:opacity-50"
                     >
-                      Retry
+                      {retryingJob === f.jobName ? "Retrying…" : "Retry"}
                     </button>
                   </div>
                 ))}
@@ -341,12 +433,21 @@ export default function AutomationPage() {
                 {JOB_NAMES.map((jobName) => {
                   const last = lastByJob[jobName];
                   const isRunning = runningJob === jobName;
+                  const isRetrying = retryingJob === jobName;
+                  const rowBusy = runningNightly || isRunning || isRetrying;
                   return (
                     <div key={jobName} className="px-4 py-3 flex items-center justify-between">
                       <div>
                         <div className="text-sm font-medium text-[#171A20]">{JOB_LABELS[jobName]}</div>
                         {last?.errorMessage && (
-                          <div className="text-xs text-red-500 mt-0.5">{last.errorMessage}</div>
+                          <div className="text-xs text-red-500 mt-0.5">
+                            {last.errorMessage}
+                            {last.errorCategory && (
+                              <span className="ml-1.5 px-1 py-0.5 bg-red-100 text-red-700 rounded text-[10px] uppercase">
+                                {last.errorCategory}
+                              </span>
+                            )}
+                          </div>
                         )}
                       </div>
                       <div className="flex items-center gap-2">
@@ -354,15 +455,15 @@ export default function AutomationPage() {
                         {last?.status === "failed" && (
                           <button
                             onClick={() => retryJob(jobName)}
-                            disabled={isAnyRunning}
+                            disabled={rowBusy}
                             className="px-2.5 py-1 text-xs border border-[#EEEEEE] rounded hover:bg-[#F4F4F4] disabled:opacity-50"
                           >
-                            Retry
+                            {isRetrying ? "Retrying…" : "Retry"}
                           </button>
                         )}
                         <button
                           onClick={() => triggerJob(jobName)}
-                          disabled={isAnyRunning}
+                          disabled={rowBusy}
                           className="px-2.5 py-1 text-xs bg-[#171A20] text-white rounded hover:bg-[#2a2d35] disabled:opacity-50"
                         >
                           {isRunning ? "Running…" : "Run"}
@@ -383,7 +484,10 @@ export default function AutomationPage() {
                 <div className="text-sm text-[#8E8E8E]">No jobs have run yet.</div>
               ) : (
                 <div className="bg-white border border-[#EEEEEE] rounded-lg divide-y divide-[#EEEEEE]">
-                  {history.map(job => (
+                  {history.map(job => {
+                    const expanded = expandedJobId === job.id;
+                    const hasDetail = !!job.resultDetail || !!job.errorStack;
+                    return (
                     <div key={job.id} className="px-4 py-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -391,10 +495,23 @@ export default function AutomationPage() {
                           <span className="text-sm font-medium text-[#171A20]">
                             {JOB_LABELS[job.jobName] ?? job.jobName}
                           </span>
+                          {job.errorCategory && (
+                            <span className="px-1 py-0.5 bg-red-100 text-red-700 rounded text-[10px] uppercase">
+                              {job.errorCategory}
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center gap-3 text-xs text-[#8E8E8E]">
                           <span>{fmtDuration(job.durationMs)}</span>
                           <span>{fmt(job.startedAt)}</span>
+                          {hasDetail && (
+                            <button
+                              onClick={() => setExpandedJobId(expanded ? null : job.id)}
+                              className="text-[#3E6AE1] hover:underline"
+                            >
+                              {expanded ? "Hide details" : "Details"}
+                            </button>
+                          )}
                         </div>
                       </div>
                       {job.resultSummary && (
@@ -403,8 +520,25 @@ export default function AutomationPage() {
                       {job.errorMessage && (
                         <div className="text-xs text-red-500 mt-1">{job.errorMessage}</div>
                       )}
+                      {expanded && (
+                        <div className="mt-2 space-y-2">
+                          {job.jobName === "integrity_check" && isIntegrityDetail(job.resultDetail) ? (
+                            <IntegrityDetail detail={job.resultDetail} />
+                          ) : job.resultDetail != null ? (
+                            <pre className="text-[11px] bg-[#F4F4F4] rounded p-2 overflow-x-auto whitespace-pre-wrap">
+                              {JSON.stringify(job.resultDetail, null, 2)}
+                            </pre>
+                          ) : null}
+                          {job.errorStack && (
+                            <pre className="text-[11px] bg-red-50 text-red-700 rounded p-2 overflow-x-auto whitespace-pre-wrap">
+                              {job.errorStack}
+                            </pre>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

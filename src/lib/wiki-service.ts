@@ -25,6 +25,16 @@ function ensureDir(dir: string) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
+/** Append content to a wiki file, creating its directory first. Rethrows on failure so callers' job wrappers record it. */
+export function appendToWikiFile(filePath: string, content: string) {
+  try {
+    ensureDir(path.dirname(filePath));
+    fs.appendFileSync(filePath, content, "utf8");
+  } catch (err) {
+    throw new Error(`Failed to write ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }

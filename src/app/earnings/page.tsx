@@ -10,6 +10,7 @@ interface EarningsEvent {
   fiscalQuarter: number | null;
   fiscalYear: number | null;
   reportDate: string | null;
+  reportTime: string | null;
   epsActual: number | null;
   epsEstimate: number | null;
   revenueActual: number | null;
@@ -59,6 +60,7 @@ function AddEarningsForm({ onAdded }: { onAdded: () => void }) {
   const [revEstimate, setRevEstimate] = useState("");
   const [guidance, setGuidance] = useState("");
   const [commentary, setCommentary] = useState("");
+  const [reportTime, setReportTime] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,6 +77,7 @@ function AddEarningsForm({ onAdded }: { onAdded: () => void }) {
           fiscalQuarter: parseInt(fiscalQ),
           fiscalYear: parseInt(fiscalY),
           reportDate: new Date().toISOString().slice(0, 10),
+          reportTime: reportTime || null,
           epsActual: epsActual ? parseFloat(epsActual) : null,
           epsEstimate: epsEstimate ? parseFloat(epsEstimate) : null,
           revenueActual: revActual ? parseFloat(revActual) : null,
@@ -89,7 +92,7 @@ function AddEarningsForm({ onAdded }: { onAdded: () => void }) {
       if (!res.ok) throw new Error(data.error ?? "Failed to save");
       setOpen(false);
       setTicker(""); setEpsActual(""); setEpsEstimate(""); setRevActual(""); setRevEstimate("");
-      setGuidance(""); setCommentary("");
+      setGuidance(""); setCommentary(""); setReportTime("");
       onAdded();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
@@ -118,6 +121,11 @@ function AddEarningsForm({ onAdded }: { onAdded: () => void }) {
           {[1,2,3,4].map(q => <option key={q} value={q}>Q{q}</option>)}
         </select>
         <input value={fiscalY} onChange={e => setFiscalY(e.target.value)} placeholder="Year" className="text-sm border border-[#EEEEEE] rounded-lg px-3 py-2 focus:outline-none focus:border-[#3E6AE1] placeholder-[#AAAAAA]" />
+        <select value={reportTime} onChange={e => setReportTime(e.target.value)} className="text-sm border border-[#EEEEEE] rounded-lg px-3 py-2 focus:outline-none focus:border-[#3E6AE1]">
+          <option value="">Time —</option>
+          <option value="BMO">BMO</option>
+          <option value="AMC">AMC</option>
+        </select>
         <input value={epsActual} onChange={e => setEpsActual(e.target.value)} placeholder="EPS Actual" className="text-sm border border-[#EEEEEE] rounded-lg px-3 py-2 focus:outline-none focus:border-[#3E6AE1] placeholder-[#AAAAAA]" />
         <input value={epsEstimate} onChange={e => setEpsEstimate(e.target.value)} placeholder="EPS Estimate" className="text-sm border border-[#EEEEEE] rounded-lg px-3 py-2 focus:outline-none focus:border-[#3E6AE1] placeholder-[#AAAAAA]" />
         <input value={revActual} onChange={e => setRevActual(e.target.value)} placeholder="Revenue Actual ($M)" className="text-sm border border-[#EEEEEE] rounded-lg px-3 py-2 focus:outline-none focus:border-[#3E6AE1] placeholder-[#AAAAAA]" />
@@ -158,6 +166,11 @@ function EarningsRow({ event }: { event: EarningsEvent }) {
           <span className="text-xs bg-[#F4F4F4] text-[#5C5E62] px-2 py-0.5 rounded font-medium">
             {event.fiscalPeriod ?? `Q${event.fiscalQuarter} ${event.fiscalYear}`}
           </span>
+          {event.reportTime && (
+            <span className="text-xs bg-[#F4F4F4] text-[#5C5E62] px-2 py-0.5 rounded font-medium uppercase">
+              {event.reportTime}
+            </span>
+          )}
           <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-2 min-w-0">
             <div className="text-xs text-[#5C5E62]">
               EPS: <span className="font-medium text-[#171A20]">{event.epsActual != null ? `$${event.epsActual}` : "—"}</span>
@@ -242,16 +255,22 @@ function EarningsRow({ event }: { event: EarningsEvent }) {
 export default function EarningsPage() {
   const [events, setEvents] = useState<EarningsEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [filterTicker, setFilterTicker] = useState("");
 
   async function load() {
     setLoading(true);
+    setError(null);
     try {
       const params = new URLSearchParams({ limit: "50" });
       if (filterTicker.trim()) params.set("ticker", filterTicker.trim().toUpperCase());
       const res = await fetch(`/api/earnings?${params}`);
+      if (!res.ok) throw new Error(`Failed to load earnings (${res.status})`);
       const data = await res.json();
       setEvents(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load earnings");
+      setEvents([]);
     } finally {
       setLoading(false);
     }
@@ -308,6 +327,17 @@ export default function EarningsPage() {
         <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
           {loading ? (
             <div className="p-10 text-center text-sm text-[#8E8E8E]">Loading earnings…</div>
+          ) : error ? (
+            <div className="p-10 text-center">
+              <p className="text-sm font-medium text-red-600">Failed to load earnings</p>
+              <p className="text-xs text-[#8E8E8E] mt-1">{error}</p>
+              <button
+                onClick={load}
+                className="mt-3 text-xs font-medium text-[#5C5E62] border border-[#EEEEEE] rounded-lg px-3 py-1.5 hover:bg-[#F9F9F9]"
+              >
+                Retry
+              </button>
+            </div>
           ) : events.length === 0 ? (
             <div className="p-10 text-center">
               <p className="text-sm font-medium text-[#5C5E62]">No earnings events found</p>

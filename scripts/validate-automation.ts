@@ -134,7 +134,7 @@ async function run() {
     });
     pass("Fake failure job created", fakeFailure.id);
 
-    const retried = await retryFailedJobs(new Date(Date.now() - 7200 * 1000));
+    const retried = await retryFailedJobs(undefined, new Date(Date.now() - 7200 * 1000));
     const retryResult = retried.find(r => r.jobName === "integrity_check");
     if (retryResult) {
       pass("retryFailedJobs found and re-ran integrity_check", `status=${retryResult.status}`);

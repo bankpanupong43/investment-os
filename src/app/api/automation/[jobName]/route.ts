@@ -29,10 +29,13 @@ export async function POST(
   const action = body.action ?? "run";
 
   if (action === "retry") {
-    const results = await retryFailedJobs();
-    const matched = results.find(r => r.jobName === jobName);
+    const results = await retryFailedJobs(jobName);
+    const matched = results[0];
     if (!matched) {
-      return NextResponse.json({ message: "No recent failure found for this job", jobName });
+      return NextResponse.json(
+        { error: "No failure in the last 24h for this job", jobName },
+        { status: 404 }
+      );
     }
     return NextResponse.json(matched);
   }

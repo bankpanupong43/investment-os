@@ -11,11 +11,11 @@
 //
 // Rules-based — no AI API calls. All signals from DB + real-world data.
 
-import fs from "fs";
 import path from "path";
 import { db } from "./db";
 import { getActivePortfolioPositions } from "./portfolio-value-engine";
 import { resolveBrainOsPath } from "./shared-paths";
+import { appendToWikiFile } from "./wiki-service";
 import {
   type HedgeEfficiencyResult,
   type ReplacementScenario,
@@ -1391,7 +1391,6 @@ function buildRecommendations(
 export function writeHedgeAuditToWiki(audit: HedgeAuditResult, reviewDate: Date): void {
   const BRAIN_OS_ROOT = process.env.BRAIN_OS_ROOT ?? resolveBrainOsPath() ?? path.join(process.cwd(), "brain-os");
   const filePath = path.join(BRAIN_OS_ROOT, "07 Investment", "Wiki", "Portfolio", "Architecture-Review.md");
-  if (!fs.existsSync(filePath)) return;
 
   const month = reviewDate.toISOString().slice(0, 7);
 
@@ -1462,7 +1461,7 @@ export function writeHedgeAuditToWiki(audit: HedgeAuditResult, reviewDate: Date)
     "",
   ].join("\n");
 
-  fs.appendFileSync(filePath, section, "utf8");
+  appendToWikiFile(filePath, section);
 }
 
 // ─── Regime Hedge Wiki writer — Phase 16.4 ───────────────────────────────────
@@ -1470,7 +1469,6 @@ export function writeHedgeAuditToWiki(audit: HedgeAuditResult, reviewDate: Date)
 export function writeRegimeHedgeToWiki(report: RegimeHedgeReport, reviewDate: Date): void {
   const BRAIN_OS_ROOT = process.env.BRAIN_OS_ROOT ?? resolveBrainOsPath() ?? path.join(process.cwd(), "brain-os");
   const filePath = path.join(BRAIN_OS_ROOT, "07 Investment", "Wiki", "Portfolio", "Architecture-Review.md");
-  if (!fs.existsSync(filePath)) return;
 
   const month = reviewDate.toISOString().slice(0, 7);
   const r     = report;
@@ -1561,7 +1559,7 @@ export function writeRegimeHedgeToWiki(report: RegimeHedgeReport, reviewDate: Da
     ...verdictSection,
   ].join("\n");
 
-  fs.appendFileSync(filePath, section, "utf8");
+  appendToWikiFile(filePath, section);
 }
 
 // ─── Hedge Ranking Wiki writer — Phase 16.3 ──────────────────────────────────
@@ -1573,7 +1571,6 @@ export function writeHedgeRankingToWiki(
 ): void {
   const BRAIN_OS_ROOT = process.env.BRAIN_OS_ROOT ?? resolveBrainOsPath() ?? path.join(process.cwd(), "brain-os");
   const filePath = path.join(BRAIN_OS_ROOT, "07 Investment", "Wiki", "Portfolio", "Architecture-Review.md");
-  if (!fs.existsSync(filePath)) return;
 
   const month = reviewDate.toISOString().slice(0, 7);
   const sign = (v: number) => (v >= 0 ? "+" : "") + v.toFixed(1);
@@ -1617,7 +1614,7 @@ export function writeHedgeRankingToWiki(
     "",
   ].join("\n");
 
-  fs.appendFileSync(filePath, section, "utf8");
+  appendToWikiFile(filePath, section);
 }
 
 // ─── Main generator ───────────────────────────────────────────────────────────

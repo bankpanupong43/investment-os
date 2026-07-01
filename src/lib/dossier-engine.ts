@@ -8,6 +8,7 @@
 import { db } from "./db";
 import { loadBrainContext } from "./brain-os-context";
 import type { InvestmentPhilosophyContext } from "./brain-os-context";
+import { parseDisruptionAnalysis, type DisruptionAnalysis } from "./disruption-engine";
 import { computeOpportunities, type OpportunityEntry } from "./opportunity-engine";
 import { fetchCompanyProfile, fetchFundamentals, type FMPProfile } from "./fmp-client";
 import { computeScores } from "./scoring-engine";
@@ -122,6 +123,8 @@ export interface ResearchDossierData {
   interpretation: InterpretationItem[];
   recommendation: RecommendationSection;
   evidenceSummary: EvidenceSummary;
+  // Disruption analysis (on-demand, generated/persisted separately — never cleared by dossier regeneration)
+  disruptionAnalysis?: DisruptionAnalysis | null;
   // Phase 13A
   isOnDemand?: boolean;
   // True when FMP premium endpoints returned 402 — dossier generated from profile only.
@@ -1041,6 +1044,7 @@ export function parseDossierRow(row: {
   investmentSummary: string; businessOverview: string; whyBuy: string;
   risks: string; portfolioFit: string; thesisDraft: string; suggestedAllocation: string;
   facts?: string; interpretation?: string; recommendation?: string; evidenceSummary?: string;
+  disruptionAnalysis?: string;
   generatedAt: Date; isOnDemand?: boolean; premiumDataUnavailable?: boolean;
 }): ResearchDossierData {
   const investmentSummary: InvestmentSummary = JSON.parse(row.investmentSummary);
@@ -1077,6 +1081,7 @@ export function parseDossierRow(row: {
     interpretation: JSON.parse(row.interpretation ?? "[]"),
     recommendation: JSON.parse(row.recommendation ?? "{}"),
     evidenceSummary: JSON.parse(row.evidenceSummary ?? "{}"),
+    disruptionAnalysis: parseDisruptionAnalysis(row.disruptionAnalysis),
     isOnDemand: row.isOnDemand ?? false,
     premiumDataUnavailable: row.premiumDataUnavailable ?? false,
   };

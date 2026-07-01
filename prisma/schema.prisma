@@ -269,6 +269,7 @@ model EarningsEvent {
   fiscalYear            Int? // e.g. 2024
   fiscalPeriod          String? // human-readable: "Q1 2024"
   reportDate            DateTime?
+  reportTime            String? // BMO | AMC | unknown
   epsActual             Float?
   epsEstimate           Float?
   revenueActual         Float?
@@ -549,6 +550,7 @@ model ResearchDossier {
   interpretation      String   @default("[]") // JSON: InterpretationItem[]
   recommendation      String   @default("{}") // JSON: RecommendationSection
   evidenceSummary     String   @default("{}") // JSON: EvidenceSummary
+  disruptionAnalysis  String   @default("{}") // JSON: DisruptionAnalysis
   generatedAt              DateTime @default(now())
   // Phase 13A: on-demand research (not universe-backed)
   isOnDemand               Boolean  @default(false)
@@ -664,10 +666,15 @@ model Job {
   durationMs    Int?
   resultSummary String? // human-readable one-line result
   errorMessage  String?
+  runId         String? // groups all jobs from one runNightlySequence() batch
+  resultDetail  String? // structured detail as JSON string, e.g. per-check integrity results
+  errorStack    String? // full stack trace on failure
+  errorCategory String? // network | filesystem | database | unknown
 
   @@index([jobName])
   @@index([status])
   @@index([startedAt])
+  @@index([runId])
   @@map("jobs")
 }
 

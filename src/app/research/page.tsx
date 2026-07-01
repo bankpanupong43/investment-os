@@ -6,6 +6,7 @@ import type { OpportunityEntry, OpportunityResult } from "@/app/api/opportunitie
 import type { FMPSearchResult } from "@/lib/fmp-client";
 import type { PeerRow } from "@/app/api/research/[ticker]/peers/route";
 import type { InsiderSummary } from "@/app/api/research/[ticker]/insider/route";
+import type { DisruptionAnalysis } from "@/app/api/research/[ticker]/disruption/route";
 
 // ─── Strength / severity indicators ──────────────────────────────────────────
 
@@ -227,6 +228,9 @@ function DossierCard({
   const [peersLoading, setPeersLoading] = useState(false);
   const [insider, setInsider]   = useState<InsiderSummary | null>(null);
   const [insiderLoading, setInsiderLoading] = useState(false);
+  const [disruption, setDisruption] = useState<DisruptionAnalysis | null>(d.disruptionAnalysis ?? null);
+  const [disruptionLoading, setDisruptionLoading] = useState(false);
+  const [disruptionError, setDisruptionError] = useState<string | null>(null);
   const scoreColor = d.opportunityScore >= 75 ? "#2d7d46" : d.opportunityScore >= 55 ? "#3E6AE1" : "#D97706";
   const fmtUsd = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 
@@ -274,6 +278,21 @@ function DossierCard({
       setUniverseMsg(e instanceof Error ? e.message : "Failed to add to universe");
     } finally {
       setAddingToUniverse(false);
+    }
+  }
+
+  async function handleGenerateDisruption() {
+    setDisruptionLoading(true);
+    setDisruptionError(null);
+    try {
+      const res = await fetch(`/api/research/${d.ticker}/disruption`, { method: "POST" });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      setDisruption(body as DisruptionAnalysis);
+    } catch (e) {
+      setDisruptionError(e instanceof Error ? e.message : "Failed to generate disruption analysis");
+    } finally {
+      setDisruptionLoading(false);
     }
   }
 
@@ -441,6 +460,116 @@ function DossierCard({
                 </div>
               ))}
             </div>
+          </section>
+
+          {/* Disruption Analysis */}
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-[11px] font-semibold text-[#8E8E8E] uppercase tracking-wide">Disruption Analysis</h3>
+              <button
+                onClick={handleGenerateDisruption}
+                disabled={disruptionLoading}
+                className="text-[11px] font-medium text-[#3E6AE1] hover:text-[#2d4fb0] disabled:text-[#AAAAAA] disabled:cursor-not-allowed"
+              >
+                {disruptionLoading ? "Analyzing…" : disruption ? "Regenerate" : "Generate"}
+              </button>
+            </div>
+
+            {disruptionError && (
+              <p className="text-xs text-[#DC2626] mb-2">{disruptionError}</p>
+            )}
+
+            {disruptionLoading && (
+              <div className="h-24 bg-[#F4F4F4] rounded-xl animate-pulse" />
+            )}
+
+            {!disruptionLoading && !disruption && !disruptionError && (
+              <p className="text-xs text-[#8E8E8E]">Not yet analyzed — click Generate to run disruption analysis.</p>
+            )}
+
+            {!disruptionLoading && disruption && (
+              <div className="space-y-4">
+                {/* Score / confidence / trend */}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-[#8E8E8E] uppercase tracking-wide">Score</span>
+                    <SevBadge s={disruption.disruptionScore} />
+                  </div>
+                  <span className="text-[10px] text-[#8E8E8E]">Confidence {disruption.confidence.toFixed(0)}/10</span>
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                    style={{
+                      backgroundColor: disruption.trend === "increasing" ? "#FEF2F2" : disruption.trend === "decreasing" ? "#F0FDF4" : "#F4F4F4",
+                      color: disruption.trend === "increasing" ? "#991B1B" : disruption.trend === "decreasing" ? "#14532D" : "#5C5E62",
+                    }}>
+                    {disruption.trend}
+                  </span>
+                  <span className="text-[10px] text-[#AAAAAA]">
+                    Last analyzed {new Date(disruption.generatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </span>
+                </div>
+
+                {/* Current threats */}
+                {disruption.threats.length > 0 && (
+                  <div>
+                    <div className="text-[11px] font-semibold text-[#8E8E8E] mb-1.5">Current Threats</div>
+                    <ul className="space-y-2">
+                      {disruption.threats.map((t, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          <SevBadge s={t.severity} />
+                          <span className="text-xs text-[#5C5E62] leading-snug">
+                            <span className="font-medium text-[#171A20]">{t.title}</span> — {t.description}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Potential disruptors */}
+                {disruption.disruptors.length > 0 && (
+                  <div>
+                    <div className="text-[11px] font-semibold text-[#8E8E8E] mb-1.5">Potential Disruptors</div>
+                    <ul className="space-y-2">
+                      {disruption.disruptors.map((ds, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          <SevBadge s={ds.threatLevel} />
+                          <span className="text-xs text-[#5C5E62] leading-snug">
+                            <span className="font-medium text-[#171A20]">{ds.name}</span>
+                            <span className="text-[#AAAAAA]"> ({ds.category.replace(/_/g, " ")}, {ds.timeHorizon.replace(/_/g, " ")})</span>
+                            {" — "}{ds.description}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Thesis break conditions */}
+                {disruption.thesisBreakConditions.length > 0 && (
+                  <div>
+                    <div className="text-[11px] font-semibold text-[#8E8E8E] mb-1.5">Thesis Break Conditions</div>
+                    <ul className="space-y-1.5">
+                      {disruption.thesisBreakConditions.map((c, i) => (
+                        <li key={i} className="text-xs text-[#5C5E62] leading-snug">
+                          <span className="font-medium text-[#171A20]">{c.metric}</span>{" "}
+                          <span className="text-[#8E8E8E]">{c.operator}</span>{" "}
+                          <span className="font-medium text-[#171A20]">{c.threshold}</span>
+                          {" — "}{c.description}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* AI summary */}
+                <div className="bg-[#F9F9F9] rounded-lg p-3 space-y-1.5">
+                  <p className="text-xs text-[#5C5E62] leading-snug"><span className="font-medium text-[#171A20]">Biggest threats:</span> {disruption.aiSummary.biggestThreats}</p>
+                  <p className="text-xs text-[#5C5E62] leading-snug"><span className="font-medium text-[#171A20]">Watch for:</span> {disruption.aiSummary.whatToMonitor}</p>
+                  <p className="text-xs text-[#5C5E62] leading-snug"><span className="font-medium text-[#171A20]">Probability:</span> {disruption.aiSummary.probability}</p>
+                  <p className="text-xs text-[#5C5E62] leading-snug"><span className="font-medium text-[#171A20]">Time horizon:</span> {disruption.aiSummary.timeHorizon}</p>
+                </div>
+              </div>
+            )}
           </section>
 
           {/* Scenario Analysis */}

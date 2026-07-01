@@ -21,6 +21,7 @@ export interface EarningsDataPoint {
   fiscalQuarter: number;       // 1–4
   fiscalYear: number;
   reportDate: string;          // ISO date string
+  reportTime: string | null;   // BMO | AMC | null
   epsActual: number | null;
   epsEstimate: number | null;
   revenueActual: number | null;  // USD millions
@@ -136,6 +137,7 @@ export async function storeEarningsEvent(data: EarningsDataPoint): Promise<strin
     await db.earningsEvent.update({
       where: { id: existing.id },
       data: {
+        reportTime: data.reportTime,
         epsActual: data.epsActual,
         epsEstimate: data.epsEstimate,
         revenueActual: data.revenueActual,
@@ -157,6 +159,7 @@ export async function storeEarningsEvent(data: EarningsDataPoint): Promise<strin
       fiscalYear: data.fiscalYear,
       fiscalPeriod: period,
       reportDate: data.reportDate ? new Date(data.reportDate) : null,
+      reportTime: data.reportTime,
       epsActual: data.epsActual,
       epsEstimate: data.epsEstimate,
       revenueActual: data.revenueActual,
@@ -200,6 +203,7 @@ function extractEarningsFromContent(
     fiscalQuarter: quarter,
     fiscalYear: year,
     reportDate: filingDate.toISOString().slice(0, 10),
+    reportTime: null, // not reliably extractable from 8-K text
     epsActual: epsMatch ? parseFloat(epsMatch[1]) : null,
     epsEstimate: null,
     revenueActual: revMatch ? parseAmount(revMatch[1], revMatch[2]) : null,
@@ -216,6 +220,7 @@ function earningsEventToDataPoint(event: {
   fiscalQuarter: number | null;
   fiscalYear: number | null;
   reportDate: Date | null;
+  reportTime: string | null;
   epsActual: number | null;
   epsEstimate: number | null;
   revenueActual: number | null;
@@ -230,6 +235,7 @@ function earningsEventToDataPoint(event: {
     fiscalQuarter: event.fiscalQuarter ?? 1,
     fiscalYear: event.fiscalYear ?? new Date().getFullYear(),
     reportDate: event.reportDate?.toISOString().slice(0, 10) ?? "",
+    reportTime: event.reportTime,
     epsActual: event.epsActual,
     epsEstimate: event.epsEstimate,
     revenueActual: event.revenueActual,

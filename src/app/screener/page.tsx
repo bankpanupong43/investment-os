@@ -114,7 +114,7 @@ function FilterBar({ filters, onChange }: { filters: Filters; onChange: (f: Filt
 
 type SortKey = "totalScore" | "businessQuality" | "growth" | "financialStrength" | "capitalAllocation" | "ticker" | "marketCap";
 
-function UniverseTable({ entries, showAll = false }: { entries: ScoredEntry[]; showAll?: boolean }) {
+function UniverseTable({ entries, showAll = false, recalculating = false }: { entries: ScoredEntry[]; showAll?: boolean; recalculating?: boolean }) {
   const [sortBy, setSortBy] = useState<SortKey>("totalScore");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [showCount, setShowCount] = useState(50);
@@ -165,6 +165,7 @@ function UniverseTable({ entries, showAll = false }: { entries: ScoredEntry[]; s
               <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[#8E8E8E]">Tier</th>
               <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[#8E8E8E]">Sector</th>
               <SortHeader col="totalScore" label="Score" />
+              <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[#8E8E8E] whitespace-nowrap">Last Calc</th>
               <SortHeader col="businessQuality" label="Quality" />
               <SortHeader col="growth" label="Growth" />
               <SortHeader col="financialStrength" label="FinStr" />
@@ -175,7 +176,7 @@ function UniverseTable({ entries, showAll = false }: { entries: ScoredEntry[]; s
           <tbody className="divide-y divide-[#EEEEEE]">
             {visible.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-4 py-8 text-center text-sm text-[#8E8E8E]">No entries match the current filters.</td>
+                <td colSpan={11} className="px-4 py-8 text-center text-sm text-[#8E8E8E]">No entries match the current filters.</td>
               </tr>
             ) : (
               visible.map(e => (
@@ -198,6 +199,15 @@ function UniverseTable({ entries, showAll = false }: { entries: ScoredEntry[]; s
                         {e.latestScore.totalScore}
                       </span>
                     ) : <span className="text-xs text-[#CCCCCC]">—</span>}
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {recalculating ? (
+                      <span className="text-[10px] font-medium text-amber-600">Calculating…</span>
+                    ) : e.latestScore ? (
+                      <span className="text-xs text-[#8E8E8E]" title={new Date(e.latestScore.scoredAt).toLocaleString()}>
+                        {timeAgo(e.latestScore.scoredAt)}
+                      </span>
+                    ) : <span className="text-xs text-[#CCCCCC]">Never</span>}
                   </td>
                   <td className="px-3 py-3"><ScoreBar value={e.latestScore?.businessQuality ?? 0} /></td>
                   <td className="px-3 py-3"><ScoreBar value={e.latestScore?.growth ?? 0} /></td>
@@ -712,9 +722,12 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "status", label: "Data Status" },
 ];
 
+const SCORE_JOBS = ["universe_rescore", "fmp_refresh"];
+
 export default function ScreenerPage() {
   const [data, setData] = useState<ScreenerResult | null>(null);
   const [loading, setLoading] = useState(true);
+  const [recalculating, setRecalculating] = useState(false);
   const [tab, setTab] = useState<Tab>("queue");
   const [filters, setFilters] = useState<{
     grossMarginMin: string; operatingMarginMin: string;
@@ -742,6 +755,26 @@ export default function ScreenerPage() {
   }, [filters]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Poll automation status to detect whether universe scores are actively being recalculated
+  useEffect(() => {
+    let cancelled = false;
+    async function checkRecalc() {
+      try {
+        const res = await fetch("/api/automation");
+        if (!res.ok) return;
+        const { status } = await res.json();
+        const active = (status?.runningJobs ?? []).some((j: string) => SCORE_JOBS.includes(j));
+        if (!cancelled) setRecalculating(active);
+        if (active && !cancelled) load();
+      } catch {
+        // ignore transient polling failures
+      }
+    }
+    checkRecalc();
+    const interval = setInterval(checkRecalc, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [load]);
 
   const tierEntries = (tier: string) => (data?.all ?? []).filter(e => e.universeTier === tier);
   const passedEntries = (tier?: string) => {
@@ -810,6 +843,13 @@ export default function ScreenerPage() {
           ))}
         </div>
 
+        {recalculating && tab !== "status" && (
+          <div className="mt-4 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+            <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            Universe scores are being recalculated — values below may update shortly.
+          </div>
+        )}
+
         {/* Content */}
         {tab === "status" ? (
           <IngestionDashboard onRefreshComplete={load} />
@@ -818,9 +858,9 @@ export default function ScreenerPage() {
         ) : data ? (
           <div>
             {tab === "queue" && <ResearchQueue entries={data.researchQueue} />}
-            {tab === "all" && <UniverseTable entries={data.all} />}
+            {tab === "all" && <UniverseTable entries={data.all} recalculating={recalculating} />}
             {(["tier1","tier2","tier3","tier4","tier5"] as const).map(tier => (
-              tab === tier && <UniverseTable key={tier} entries={tierEntries(tier)} />
+              tab === tier && <UniverseTable key={tier} entries={tierEntries(tier)} recalculating={recalculating} />
             ))}
           </div>
         ) : (

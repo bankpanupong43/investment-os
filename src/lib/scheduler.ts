@@ -3,6 +3,7 @@
 // Each job is a named async function. Jobs are run in a fixed nightly sequence.
 // Every run is recorded in the Job DB table for the dashboard and audit trail.
 
+import crypto from "crypto";
 import { db } from "./db";
 import { backupFull } from "./backup-service";
 import { runIntegrityChecks } from "./integrity-engine";
@@ -29,6 +30,7 @@ export interface JobResult {
   success: boolean;
   summary: string;
   error?: string;
+  detail?: unknown; // structured detail persisted to Job.resultDetail (e.g. per-check integrity results)
 }
 
 export interface JobRecord {
@@ -40,6 +42,10 @@ export interface JobRecord {
   durationMs: number | null;
   resultSummary: string | null;
   errorMessage: string | null;
+  runId: string | null;
+  resultDetail: unknown;
+  errorStack: string | null;
+  errorCategory: string | null;
 }
 
 export interface ScheduleStatus {
@@ -48,6 +54,12 @@ export interface ScheduleStatus {
   nextRunAt: string;
   runningJob: string | null;
   recentJobs: JobRecord[];
+  overallHealth: "passed" | "partial" | "failed" | "unknown";
+  failedJobs: number;
+  successRate: number | null;
+  lastFailureAt: string | null;
+  runningJobs: string[];
+  recentErrors: { jobName: string; errorMessage: string | null }[];
 }
 
 export interface NightlyRunResult {
@@ -68,7 +80,8 @@ export const JOB_NAMES = [
   "integrity_check",
   "macro_ingestion",
   "sec_filing_refresh",
-  "earnings_refresh",
+  "earnings_ingestion",
+  "thesis_impact_refresh",
   "fmp_refresh",
   "universe_rescore",
   "opportunity_refresh",
@@ -99,7 +112,8 @@ export const JOB_LABELS: Record<JobName, string> = {
   integrity_check: "Integrity Check",
   macro_ingestion: "Macro Intelligence Ingestion",
   sec_filing_refresh: "SEC Filing Refresh",
-  earnings_refresh: "Earnings Refresh",
+  earnings_ingestion: "Earnings Ingestion",
+  thesis_impact_refresh: "Thesis Impact Refresh",
   fmp_refresh: "FMP Fundamentals Refresh",
   universe_rescore: "Universe Rescore",
   opportunity_refresh: "Opportunity Refresh",
@@ -126,7 +140,8 @@ const JOB_RUNNERS: Record<JobName, () => Promise<JobResult>> = {
   integrity_check: runIntegrityCheck,
   macro_ingestion: runMacroIngestion_,
   sec_filing_refresh: runSecFilingRefresh,
-  earnings_refresh: runEarningsRefresh,
+  earnings_ingestion: runEarningsIngestion,
+  thesis_impact_refresh: runThesisImpactRefresh,
   fmp_refresh: runFmpRefresh,
   universe_rescore: runUniverseRescore,
   opportunity_refresh: runOpportunityRefresh,
@@ -170,7 +185,11 @@ async function runBackup(): Promise<JobResult> {
 async function runIntegrityCheck(): Promise<JobResult> {
   const report = await runIntegrityChecks();
   const summary = `${report.passedChecks}/${report.totalChecks} checks passed. ${report.summary}`;
-  return { success: report.errors.length === 0, summary };
+  return {
+    success: report.errors.length === 0,
+    summary,
+    detail: { errors: report.errors, warnings: report.warnings, infos: report.infos },
+  };
 }
 
 async function runSecFilingRefresh(): Promise<JobResult> {
@@ -180,7 +199,7 @@ async function runSecFilingRefresh(): Promise<JobResult> {
   return { success: result.totalErrors < tickerCount, summary };
 }
 
-async function runEarningsRefresh(): Promise<JobResult> {
+async function runThesisImpactRefresh(): Promise<JobResult> {
   // Evaluate thesis impacts for any unanalyzed filings from the last 30 days
   const impacts = await evaluatePortfolioThesisImpacts({
     since: new Date(Date.now() - 30 * 86400 * 1000),
@@ -188,6 +207,42 @@ async function runEarningsRefresh(): Promise<JobResult> {
   return {
     success: true,
     summary: `${impacts.length} thesis impacts evaluated from recent filings.`,
+  };
+}
+
+async function runEarningsIngestion(): Promise<JobResult> {
+  const { SecEarningsAdapter, storeEarningsEvent } = await import("./earnings-intelligence");
+
+  const [positions, watchlist, existingDossiers] = await Promise.all([
+    db.position.findMany({ where: { status: "active", NOT: { ticker: "CASH" } }, select: { ticker: true } }),
+    db.watchlist.findMany({ select: { ticker: true } }),
+    db.researchDossier.findMany({ select: { ticker: true } }),
+  ]);
+
+  const tickers = [...new Set([
+    ...positions.map(p => p.ticker),
+    ...watchlist.map(w => w.ticker),
+    ...existingDossiers.map(d => d.ticker),
+  ])];
+
+  let stored = 0;
+  const errors: string[] = [];
+
+  for (const ticker of tickers) {
+    try {
+      const history = await SecEarningsAdapter.fetchHistory(ticker, 4);
+      for (const dataPoint of history) {
+        await storeEarningsEvent(dataPoint);
+        stored++;
+      }
+    } catch (err) {
+      errors.push(`${ticker}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return {
+    success: errors.length < tickers.length,
+    summary: `${stored} earnings events ingested from 8-K filings across ${tickers.length} tickers.${errors.length > 0 ? ` Errors: ${errors.slice(0, 2).join("; ")}` : ""}`,
   };
 }
 
@@ -255,12 +310,17 @@ async function runDossierRefresh(): Promise<JobResult> {
 
   const { generateDossier, saveDossier } = await import("./dossier-engine");
 
-  const [positions, watchlist] = await Promise.all([
+  const [positions, watchlist, existingDossiers] = await Promise.all([
     db.position.findMany({ where: { status: "active", NOT: { ticker: "CASH" } }, select: { ticker: true } }),
     db.watchlist.findMany({ select: { ticker: true } }),
+    db.researchDossier.findMany({ select: { ticker: true } }),
   ]);
 
-  const tickers = [...new Set([...positions.map(p => p.ticker), ...watchlist.map(w => w.ticker)])];
+  const tickers = [...new Set([
+    ...positions.map(p => p.ticker),
+    ...watchlist.map(w => w.ticker),
+    ...existingDossiers.map(d => d.ticker),
+  ])];
   let generated = 0;
   const errors: string[] = [];
 
@@ -580,28 +640,42 @@ async function runPrivateScout(): Promise<JobResult> {
 
 // ─── Job runner ───────────────────────────────────────────────────────────────
 
-export async function runJob(jobName: string): Promise<JobRecord> {
+function classifyError(message: string): string {
+  if (/ECONNREFUSED|ETIMEDOUT|ENOTFOUND|fetch failed|network/i.test(message)) return "network";
+  if (/EACCES|ENOENT|EPERM|EROFS/i.test(message)) return "filesystem";
+  if (/prisma|P\d{4}|database|relation .* does not exist/i.test(message)) return "database";
+  return "unknown";
+}
+
+export async function runJob(jobName: string, runId?: string): Promise<JobRecord> {
   const runner = JOB_RUNNERS[jobName as JobName];
   if (!runner) {
     throw new Error(`Unknown job: ${jobName}`);
   }
 
   const job = await db.job.create({
-    data: { jobName, status: "running", startedAt: new Date() },
+    data: { jobName, status: "running", startedAt: new Date(), runId: runId ?? null },
   });
 
   const start = Date.now();
   let result: JobResult;
+  let errorStack: string | null = null;
+  let errorCategory: string | null = null;
 
   try {
     result = await runner();
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    errorStack = err instanceof Error ? err.stack ?? null : null;
+    errorCategory = classifyError(message);
     result = {
       success: false,
       summary: "Job threw an unexpected error",
-      error: err instanceof Error ? err.message : String(err),
+      error: message,
     };
   }
+
+  if (!errorCategory && result.error) errorCategory = classifyError(result.error);
 
   const durationMs = Date.now() - start;
   const updated = await db.job.update({
@@ -612,6 +686,9 @@ export async function runJob(jobName: string): Promise<JobRecord> {
       durationMs,
       resultSummary: result.summary,
       errorMessage: result.error ?? null,
+      resultDetail: result.detail !== undefined ? JSON.stringify(result.detail) : undefined,
+      errorStack,
+      errorCategory,
     },
   });
 
@@ -623,12 +700,13 @@ export async function runJob(jobName: string): Promise<JobRecord> {
 export async function runNightlySequence(): Promise<NightlyRunResult> {
   const startedAt = new Date().toISOString();
   const t0 = Date.now();
+  const runId = crypto.randomUUID();
   const results: NightlyRunResult["results"] = [];
 
   for (const jobName of JOB_NAMES) {
     const t1 = Date.now();
     try {
-      const record = await runJob(jobName);
+      const record = await runJob(jobName, runId);
       results.push({
         jobName,
         success: record.status === "completed",
@@ -667,10 +745,14 @@ export async function runNightlySequence(): Promise<NightlyRunResult> {
 
 // ─── Retry failed jobs ────────────────────────────────────────────────────────
 
-export async function retryFailedJobs(since?: Date): Promise<JobRecord[]> {
+export async function retryFailedJobs(jobName?: string, since?: Date): Promise<JobRecord[]> {
   const since24h = since ?? new Date(Date.now() - 86400 * 1000);
   const failed = await db.job.findMany({
-    where: { status: "failed", startedAt: { gte: since24h } },
+    where: {
+      status: "failed",
+      startedAt: { gte: since24h },
+      ...(jobName ? { jobName } : {}),
+    },
     orderBy: { startedAt: "desc" },
     distinct: ["jobName"],
   });
@@ -686,9 +768,9 @@ export async function retryFailedJobs(since?: Date): Promise<JobRecord[]> {
 // ─── Schedule status ──────────────────────────────────────────────────────────
 
 export async function getScheduleStatus(): Promise<ScheduleStatus> {
-  const [recent, running] = await Promise.all([
-    db.job.findMany({ orderBy: { startedAt: "desc" }, take: 30 }),
-    db.job.findFirst({ where: { status: "running" }, orderBy: { startedAt: "desc" } }),
+  const [recent, runningJobs] = await Promise.all([
+    db.job.findMany({ orderBy: { startedAt: "desc" }, take: 50 }),
+    db.job.findMany({ where: { status: "running" }, orderBy: { startedAt: "desc" } }),
   ]);
 
   const nightlyJobs = recent.filter(j => JOB_NAMES.includes(j.jobName as JobName));
@@ -699,12 +781,37 @@ export async function getScheduleStatus(): Promise<ScheduleStatus> {
   nextRun.setUTCHours(22, 0, 0, 0); // 22:00 UTC = ~05:00 Bangkok
   if (nextRun <= now) nextRun.setUTCDate(nextRun.getUTCDate() + 1);
 
+  // Aggregate health for the latest nightly batch: group by runId (falls back to the
+  // latest single job for legacy/ad-hoc rows without a runId), evaluated across the
+  // same `recent` set the failures list below draws from — so the two can't disagree.
+  const latestRunId = lastNightly?.runId ?? null;
+  const latestBatch = latestRunId
+    ? nightlyJobs.filter(j => j.runId === latestRunId)
+    : lastNightly ? [lastNightly] : [];
+
+  const batchFailed = latestBatch.filter(j => j.status === "failed").length;
+  const overallHealth: ScheduleStatus["overallHealth"] =
+    latestBatch.length === 0 ? "unknown" :
+    batchFailed === 0 ? "passed" :
+    batchFailed === latestBatch.length ? "failed" : "partial";
+
+  const failedRecent = recent.filter(j => j.status === "failed");
+  const successRate = recent.length > 0
+    ? Math.round((recent.filter(j => j.status === "completed").length / recent.length) * 100)
+    : null;
+
   return {
     lastRunAt: lastNightly?.completedAt?.toISOString() ?? null,
     lastRunSuccessful: lastNightly ? lastNightly.status === "completed" : null,
     nextRunAt: nextRun.toISOString(),
-    runningJob: running?.jobName ?? null,
+    runningJob: runningJobs[0]?.jobName ?? null,
     recentJobs: recent.map(serializeJob),
+    overallHealth,
+    failedJobs: failedRecent.length,
+    successRate,
+    lastFailureAt: failedRecent[0]?.startedAt.toISOString() ?? null,
+    runningJobs: runningJobs.map(j => j.jobName),
+    recentErrors: failedRecent.slice(0, 10).map(j => ({ jobName: j.jobName, errorMessage: j.errorMessage })),
   };
 }
 
@@ -757,6 +864,7 @@ function serializeJob(j: {
   id: string; jobName: string; status: string;
   startedAt: Date; completedAt: Date | null;
   durationMs: number | null; resultSummary: string | null; errorMessage: string | null;
+  runId?: string | null; resultDetail?: string | null; errorStack?: string | null; errorCategory?: string | null;
 }): JobRecord {
   return {
     id: j.id,
@@ -767,5 +875,9 @@ function serializeJob(j: {
     durationMs: j.durationMs,
     resultSummary: j.resultSummary,
     errorMessage: j.errorMessage,
+    runId: j.runId ?? null,
+    resultDetail: j.resultDetail ? JSON.parse(j.resultDetail) : null,
+    errorStack: j.errorStack ?? null,
+    errorCategory: j.errorCategory ?? null,
   };
 }

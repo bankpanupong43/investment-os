@@ -660,7 +660,7 @@ async function buildDailyDigest(positions: ActivePosition[]): Promise<DailyDiges
     }),
     db.companyMention.findMany({
       where: {
-        mentionDate: { gte: since24h.toISOString().split("T")[0] },
+        mentionDate: { gte: since24h },
         ticker: { in: [...portfolioTickers] },
       },
       orderBy: { mentionDate: "desc" },
