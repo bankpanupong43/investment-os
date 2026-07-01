@@ -909,10 +909,19 @@ async function buildTradeIdeas(
       orderBy: { createdAt: "desc" },
       select: { finalDecision: true },
     }).catch(() => null);
+    let thesisText = `Committee Strong Buy on ${s.ticker}.`;
+    if (session?.finalDecision) {
+      try {
+        const fd = JSON.parse(session.finalDecision);
+        thesisText = fd?.suggestedAllocation?.rationale ?? fd?.recommendation ?? thesisText;
+      } catch {
+        // finalDecision wasn't valid JSON — keep the default thesis text
+      }
+    }
     ideas.push({
       action: "BUY",
       ticker: s.ticker,
-      thesis: (session?.finalDecision ?? `Committee Strong Buy on ${s.ticker}.`).slice(0, 130),
+      thesis: thesisText.slice(0, 130),
       risk: "No position yet — entry before thesis validated in portfolio context.",
       urgency: "medium",
     });
