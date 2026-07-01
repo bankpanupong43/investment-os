@@ -472,14 +472,13 @@ function AgreementSection({ items }: { items: AgreementOpportunity[] }) {
 
 // ─── Tab views ────────────────────────────────────────────────────────────────
 
-type TabId = "bestBuys" | "conviction" | "underallocated" | "diversification" | "watchlist";
+type TabId = "bestBuys" | "conviction" | "underallocated" | "diversification";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "bestBuys",        label: "Best Next Buys" },
   { id: "conviction",      label: "Highest Conviction" },
   { id: "underallocated",  label: "Most Underallocated" },
   { id: "diversification", label: "Diversification" },
-  { id: "watchlist",       label: "Watchlist" },
 ];
 
 function filterAndSort(entries: OpportunityEntry[], tab: TabId): OpportunityEntry[] {
@@ -490,8 +489,6 @@ function filterAndSort(entries: OpportunityEntry[], tab: TabId): OpportunityEntr
       return [...entries].filter(e => e.allocationTarget != null && e.allocationGapScore > 0)
         .sort((a, b) => b.allocationGapScore - a.allocationGapScore);
     case "diversification": return [...entries].sort((a, b) => b.diversificationScore - a.diversificationScore);
-    case "watchlist":
-      return [...entries].filter(e => e.inWatchlist).sort((a, b) => b.objectiveScore - a.objectiveScore);
   }
 }
 

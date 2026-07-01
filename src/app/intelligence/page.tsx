@@ -138,7 +138,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "newsletters",  label: "Newsletters" },
   { id: "macro",        label: "Macro" },
   { id: "geopolitics",  label: "Geopolitics" },
-  { id: "thesis",       label: "Thesis" },
+  { id: "thesis",       label: "Thesis Health" },
   { id: "catalysts",    label: "Catalysts" },
 ];
 

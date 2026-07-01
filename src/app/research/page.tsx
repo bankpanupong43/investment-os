@@ -1152,8 +1152,8 @@ type HubTab = "search" | "dossiers" | "themes" | "theses" | "filings" | "earning
 const HUB_TABS: { id: HubTab; label: string }[] = [
   { id: "search",    label: "Companies" },
   { id: "dossiers",  label: "Dossiers" },
-  { id: "themes",    label: "Themes" },
-  { id: "theses",    label: "Thesis History" },
+  { id: "themes",    label: "Theme Notes" },
+  { id: "theses",    label: "Thesis Log" },
   { id: "filings",   label: "Filings" },
   { id: "earnings",  label: "Earnings" },
   { id: "universe",  label: "Universe" },
