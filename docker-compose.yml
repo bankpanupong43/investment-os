@@ -29,6 +29,16 @@ services:
   watchtower:
     image: containrrr/watchtower
     restart: unless-stopped
+    environment:
+      # containrrr/watchtower is unmaintained and its vendored Docker client
+      # negotiates API 1.25 by default, which newer Docker Engine releases
+      # reject outright. Pin a version the daemon actually supports so the
+      # client skips negotiation instead of crash-looping.
+      - DOCKER_API_VERSION=1.44
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Reuse the host's existing GHCR credentials so Watchtower's own
+      # registry pull/HEAD requests are authenticated (it does not inherit
+      # the host docker CLI's config automatically).
+      - /root/.docker/config.json:/config.json:ro
     command: --interval 120 --cleanup investment-os-app-1
