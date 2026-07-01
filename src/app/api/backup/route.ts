@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     } else if (type === "full_snapshot") {
       result = await backupFull(label);
     } else {
-      result = await backupDatabase(label);
+      result = await backupFull(label);
     }
     return NextResponse.json(result, { status: 201 });
   } catch (err) {

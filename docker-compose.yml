@@ -8,6 +8,8 @@ services:
       - /data/brain-os:/data/brain-os
     env_file:
       - .env.production
+    environment:
+      - PRISMA_QUERY_ENGINE_LIBRARY=/app/node_modules/.prisma/client/libquery_engine-linux-musl-openssl-3.0.x.so.node
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
       interval: 30s
