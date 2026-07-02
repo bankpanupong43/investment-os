@@ -647,10 +647,22 @@ function classifyError(message: string): string {
   return "unknown";
 }
 
+export class JobAlreadyRunningError extends Error {
+  constructor(jobName: string, startedAt: Date) {
+    super(`${jobName} is already running (started ${startedAt.toISOString()})`);
+    this.name = "JobAlreadyRunningError";
+  }
+}
+
 export async function runJob(jobName: string, runId?: string): Promise<JobRecord> {
   const runner = JOB_RUNNERS[jobName as JobName];
   if (!runner) {
     throw new Error(`Unknown job: ${jobName}`);
+  }
+
+  const alreadyRunning = await db.job.findFirst({ where: { jobName, status: "running" } });
+  if (alreadyRunning) {
+    throw new JobAlreadyRunningError(jobName, alreadyRunning.startedAt);
   }
 
   const job = await db.job.create({
@@ -759,8 +771,11 @@ export async function retryFailedJobs(jobName?: string, since?: Date): Promise<J
 
   const results: JobRecord[] = [];
   for (const job of failed) {
-    const record = await runJob(job.jobName);
-    results.push(record);
+    try {
+      results.push(await runJob(job.jobName));
+    } catch (err) {
+      if (!(err instanceof JobAlreadyRunningError)) throw err;
+    }
   }
   return results;
 }

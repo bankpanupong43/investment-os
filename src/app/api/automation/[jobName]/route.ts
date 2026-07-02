@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runJob, retryFailedJobs, getJobHistory, JOB_NAMES, type JobName } from "@/lib/scheduler";
+import { runJob, retryFailedJobs, getJobHistory, JOB_NAMES, JobAlreadyRunningError, type JobName } from "@/lib/scheduler";
 
 // GET /api/automation/[jobName] — job-specific history
 export async function GET(
@@ -40,6 +40,13 @@ export async function POST(
     return NextResponse.json(matched);
   }
 
-  const record = await runJob(jobName);
-  return NextResponse.json(record, { status: 200 });
+  try {
+    const record = await runJob(jobName);
+    return NextResponse.json(record, { status: 200 });
+  } catch (err) {
+    if (err instanceof JobAlreadyRunningError) {
+      return NextResponse.json({ error: err.message, jobName }, { status: 409 });
+    }
+    throw err;
+  }
 }
