@@ -1,0 +1,16 @@
+{
+  "label": "nightly",
+  "ts": "2026-07-02-050003",
+  "createdAt": "2026-07-01T22:00:06.128Z",
+  "database": {
+    "note": "Supabase PostgreSQL — backups managed by Supabase"
+  },
+  "brainOs": {
+    "id": "cmr2mcmf20001vapvt590ncjz",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-07-02-050003",
+    "fileSize": 9203846,
+    "checksum": "0c9df02372d47a630b34309435061f3d439ac66713d62f133bfffe55d11f958d",
+    "createdAt": "2026-07-01T22:00:06.015Z"
+  }
+}

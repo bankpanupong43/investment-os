@@ -406,5 +406,29 @@
     "fileSize": 10011202,
     "checksum": "e6e31a693955933d602c378ad3b5ff5d980ae2f6bacc2a62e6c4beb700476d33",
     "createdAt": "2026-06-29T12:42:32.519Z"
+  },
+  {
+    "id": "cmr2mcmf20001vapvt590ncjz",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-07-02-050003",
+    "fileSize": 9203846,
+    "checksum": "0c9df02372d47a630b34309435061f3d439ac66713d62f133bfffe55d11f958d",
+    "createdAt": "2026-07-01T22:00:06.015Z"
+  },
+  {
+    "id": "cmr2mcmif0002vapvmymgw6qs",
+    "backupType": "full_snapshot",
+    "filePath": "backups/full/2026-07-02-050003",
+    "fileSize": 486,
+    "checksum": "bf8595bbf46ad5f076d117544c174e79682bc858c5abb6672ea343cc39d7644e",
+    "createdAt": "2026-07-01T22:00:06.135Z"
+  },
+  {
+    "id": "cmr2mdf0h00gzvapv03vgvqey",
+    "backupType": "brain_os_export",
+    "filePath": "backups/brain-os/2026-07-02-050041",
+    "fileSize": 9203846,
+    "checksum": "142d18120efdb1430d696aadb7ffece8f15ef4aa393bc01916a77b1046c0f445",
+    "createdAt": "2026-07-01T22:00:43.073Z"
   }
 ]

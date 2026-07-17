@@ -12,6 +12,12 @@
       "projectRoot": "G:\\Projects\\investment-os",
       "sharedRoot": null,
       "brainOsRoot": null
+    },
+    {
+      "name": "MacBook Air",
+      "projectRoot": "/Users/bank/Projects/investment-os",
+      "sharedRoot": "/Users/bank/Projects",
+      "brainOsRoot": "/Users/bank/Projects/Brain OS"
     }
   ]
 }
