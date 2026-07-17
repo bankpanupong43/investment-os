@@ -2452,6 +2452,18 @@ function HistoryTab() {
 // ─── Buy Planner tab ─────────────────────────────────────────────────────────
 
 const PLANNER_BUCKETS = ALL_BUCKETS.filter(b => b !== "other");
+const PLANNER_ALLOCATION_STORAGE_KEY = "investment-os:planner-target-allocation";
+
+function loadSavedSliders(): Record<BucketId, number> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(PLANNER_ALLOCATION_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as Record<BucketId, number>;
+  } catch {
+    return null;
+  }
+}
 
 function PlannerTab() {
   const [loading, setLoading] = useState(true);
@@ -2459,8 +2471,9 @@ function PlannerTab() {
   const [currentTickerUsd, setCurrentTickerUsd] = useState<Record<string, number>>({});
   const [currentTickerPrice, setCurrentTickerPrice] = useState<Record<string, number>>({});
   const [regime, setRegime] = useState("Neutral");
+  const [hasSavedAllocation] = useState<boolean>(() => loadSavedSliders() !== null);
   const [sliders, setSliders] = useState<Record<BucketId, number>>(
-    () => ({ ...REGIME_TARGETS["Neutral"] }) as Record<BucketId, number>
+    () => loadSavedSliders() ?? (({ ...REGIME_TARGETS["Neutral"] }) as Record<BucketId, number>)
   );
   const [deployInput, setDeployInput] = useState("");
   const [bucketTickers, setBucketTickers] = useState<Record<BucketId, string[]>>(
@@ -2505,12 +2518,19 @@ function PlannerTab() {
         if (reviewData?.regime) {
           const r = reviewData.regime as string;
           setRegime(r);
-          setSliders({ ...(REGIME_TARGETS[r] ?? REGIME_TARGETS["Neutral"]) } as Record<BucketId, number>);
+          if (!hasSavedAllocation) {
+            setSliders({ ...(REGIME_TARGETS[r] ?? REGIME_TARGETS["Neutral"]) } as Record<BucketId, number>);
+          }
         }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [hasSavedAllocation]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(PLANNER_ALLOCATION_STORAGE_KEY, JSON.stringify(sliders));
+  }, [sliders]);
 
   const totalPct = PLANNER_BUCKETS.reduce((s, b) => s + (sliders[b] ?? 0), 0);
   const deployAmount = parseFloat(deployInput) || 0;
