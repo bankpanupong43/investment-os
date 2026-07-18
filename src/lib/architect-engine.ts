@@ -187,7 +187,7 @@ const SCENARIO_MAP: Record<string, Record<string, ScenarioMover>> = {
 
 // ─── Current state extraction ─────────────────────────────────────────────────
 
-interface PortfolioPosition {
+export interface PortfolioPosition {
   id: string;
   ticker: string;
   name: string;
@@ -198,7 +198,7 @@ interface PortfolioPosition {
   pct: number; // computed normalized allocation %
 }
 
-interface PortfolioState {
+export interface PortfolioState {
   positions: PortfolioPosition[];
   totalValueUsd: number;
   cashValueUsd: number;
@@ -216,7 +216,7 @@ interface PortfolioState {
   largestSector: { sector: string; pct: number } | null;
 }
 
-async function computePortfolioState(): Promise<PortfolioState> {
+export async function computePortfolioState(): Promise<PortfolioState> {
   const snapshot = await computePortfolioValue();
   const usdthb = snapshot.usdthb ?? 35;
 
