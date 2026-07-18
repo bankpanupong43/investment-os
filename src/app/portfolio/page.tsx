@@ -4,7 +4,6 @@ import Link from "next/link";
 import { ALL_BUCKETS, BUCKET_LABELS, BUCKET_MAP, REGIME_TARGETS } from "@/lib/allocation-engine";
 import type { BucketId, AllocationGap, AllocationRecommendation, BucketAllocation, ConcentrationMetric, BucketDriverSummary } from "@/lib/allocation-engine";
 import type { SimulatorResult, ComparisonRow, RegimeMatrixRow, SimulatorMove, SimulationResult } from "@/lib/allocation-simulator";
-import type { BuyPlanResult, RoleGroup } from "@/lib/buy-plan-engine";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -2478,20 +2477,15 @@ function HistoryTab() {
 
 // ─── Buy Planner tab ─────────────────────────────────────────────────────────
 
-const ROLE_COLOR: Record<RoleGroup, string> = {
-  "Large-Cap": "#3E6AE1",
-  "Mid/Small-Cap": "#9333EA",
-  "Defensive": "#0D9488",
-  "Hedge": "#B45309",
-};
-const PLANNER_TRANCHE_STORAGE_KEY = "investment-os:planner-tranche-weights";
+const PLANNER_BUCKETS = ALL_BUCKETS.filter(b => b !== "other");
+const PLANNER_ALLOCATION_STORAGE_KEY = "investment-os:planner-target-allocation";
 
-function loadSavedTranches(): [number, number, number] | null {
+function loadSavedSliders(): Record<BucketId, number> | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(PLANNER_TRANCHE_STORAGE_KEY);
+    const raw = window.localStorage.getItem(PLANNER_ALLOCATION_STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as [number, number, number];
+    return JSON.parse(raw) as Record<BucketId, number>;
   } catch {
     return null;
   }
@@ -2499,28 +2493,105 @@ function loadSavedTranches(): [number, number, number] | null {
 
 function PlannerTab() {
   const [loading, setLoading] = useState(true);
-  const [plan, setPlan] = useState<BuyPlanResult | null>(null);
-  const [tranchePcts, setTranchePcts] = useState<[number, number, number]>(
-    () => loadSavedTranches() ?? [40, 35, 25]
+  const [portfolioTotal, setPortfolioTotal] = useState(0);
+  const [currentTickerUsd, setCurrentTickerUsd] = useState<Record<string, number>>({});
+  const [currentTickerPrice, setCurrentTickerPrice] = useState<Record<string, number>>({});
+  const [regime, setRegime] = useState("Neutral");
+  const [hasSavedAllocation] = useState<boolean>(() => loadSavedSliders() !== null);
+  const [sliders, setSliders] = useState<Record<BucketId, number>>(
+    () => loadSavedSliders() ?? (({ ...REGIME_TARGETS["Neutral"] }) as Record<BucketId, number>)
   );
+  const [deployInput, setDeployInput] = useState("");
+  const [bucketTickers, setBucketTickers] = useState<Record<BucketId, string[]>>(
+    () => Object.fromEntries(ALL_BUCKETS.map(b => [b, []])) as unknown as Record<BucketId, string[]>
+  );
+  const [tickerInputs, setTickerInputs] = useState<Record<BucketId, string>>(
+    () => Object.fromEntries(ALL_BUCKETS.map(b => [b, ""])) as unknown as Record<BucketId, string>
+  );
+  const [tranchePcts, setTranchePcts] = useState([40, 35, 25]);
+  const [ownedTickers, setOwnedTickers] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    fetch("/api/buy-plan")
-      .then(r => r.json())
-      .then(data => setPlan(data))
+    Promise.all([
+      fetch("/api/portfolio-value").then(r => r.json()),
+      fetch("/api/allocation-review").then(r => r.json()),
+    ])
+      .then(([pvData, reviewData]) => {
+        const holdings: HoldingLine[] = pvData.holdings ?? [];
+        const total: number = pvData.totalValueUsd ?? 0;
+        setPortfolioTotal(total);
+        setDeployInput(total.toFixed(0));
+
+        const tickerUsd: Record<string, number> = {};
+        const tickerPrice: Record<string, number> = {};
+        const byBucket: Record<BucketId, string[]> =
+          Object.fromEntries(ALL_BUCKETS.map(b => [b, []])) as unknown as Record<BucketId, string[]>;
+        const owned = new Set<string>();
+
+        for (const h of holdings) {
+          tickerUsd[h.ticker] = h.marketValueUsd ?? 0;
+          if (h.price != null) tickerPrice[h.ticker] = h.price;
+          const bucket = (BUCKET_MAP[h.ticker] ?? "other") as BucketId;
+          byBucket[bucket] = [...(byBucket[bucket] ?? []), h.ticker];
+          owned.add(h.ticker);
+        }
+
+        setCurrentTickerUsd(tickerUsd);
+        setCurrentTickerPrice(tickerPrice);
+        setBucketTickers(byBucket);
+        setOwnedTickers(owned);
+
+        if (reviewData?.regime) {
+          const r = reviewData.regime as string;
+          setRegime(r);
+          if (!hasSavedAllocation) {
+            setSliders({ ...(REGIME_TARGETS[r] ?? REGIME_TARGETS["Neutral"]) } as Record<BucketId, number>);
+          }
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [hasSavedAllocation]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(PLANNER_TRANCHE_STORAGE_KEY, JSON.stringify(tranchePcts));
-  }, [tranchePcts]);
+    window.localStorage.setItem(PLANNER_ALLOCATION_STORAGE_KEY, JSON.stringify(sliders));
+  }, [sliders]);
 
+  const totalPct = PLANNER_BUCKETS.reduce((s, b) => s + (sliders[b] ?? 0), 0);
+  const deployAmount = parseFloat(deployInput) || 0;
+  const isBalanced = Math.abs(totalPct - 100) < 0.5;
   const trancheSum = tranchePcts.reduce((s, v) => s + v, 0);
+  const hasAnyTickers = PLANNER_BUCKETS.some(b => bucketTickers[b].length > 0);
+
+  function loadRegimeTemplate() {
+    setSliders({ ...(REGIME_TARGETS[regime] ?? REGIME_TARGETS["Neutral"]) } as Record<BucketId, number>);
+  }
+
+  function normalize() {
+    if (totalPct === 0) return;
+    const next = { ...sliders } as Record<BucketId, number>;
+    for (const b of PLANNER_BUCKETS) next[b] = Math.round((sliders[b] / totalPct) * 1000) / 10;
+    const adj = Math.round((100 - PLANNER_BUCKETS.reduce((s, b) => s + next[b], 0)) * 10) / 10;
+    if (adj !== 0) {
+      const biggest = PLANNER_BUCKETS.reduce((a, b) => next[a] >= next[b] ? a : b);
+      next[biggest] = Math.round((next[biggest] + adj) * 10) / 10;
+    }
+    setSliders(next);
+  }
+
+  function addTicker(bucket: BucketId) {
+    const t = tickerInputs[bucket].trim().toUpperCase();
+    if (!t || ownedTickers.has(t)) return;
+    setBucketTickers(prev => ({ ...prev, [bucket]: [...prev[bucket].filter(x => x !== t), t] }));
+    setTickerInputs(prev => ({ ...prev, [bucket]: "" }));
+  }
+
+  function removeTicker(bucket: BucketId, ticker: string) {
+    setBucketTickers(prev => ({ ...prev, [bucket]: prev[bucket].filter(t => t !== ticker) }));
+  }
 
   if (loading) return <div className="py-12 text-center text-sm text-[#8E8E8E]">Loading…</div>;
-  if (!plan) return <div className="py-12 text-center text-sm text-[#8E8E8E]">Could not load buy plan</div>;
 
   return (
     <div className="space-y-5">
@@ -2528,24 +2599,31 @@ function PlannerTab() {
       <div className="flex items-center justify-between">
         <div>
           <div className="text-sm font-semibold text-[#171A20]">Buy Planner</div>
-          <div className="text-xs text-[#8E8E8E] mt-0.5">Auto-recommended by role · {plan.regime} regime</div>
+          <div className="text-xs text-[#8E8E8E] mt-0.5">Set allocation %, pick tickers, get 3-tranche purchase plan</div>
         </div>
         <div className="text-right">
           <div className="text-xs text-[#8E8E8E]">Portfolio</div>
-          <div className="text-sm font-semibold text-[#171A20]">{fmt(plan.totalValueUsd)}</div>
+          <div className="text-sm font-semibold text-[#171A20]">{fmt(portfolioTotal)}</div>
         </div>
       </div>
 
-      {/* Cash context + tranche weights */}
+      {/* Deploy amount + tranche weights */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div className="bg-white border border-[#EEEEEE] rounded-xl p-4 flex items-center justify-between">
-          <div>
-            <div className="text-xs text-[#8E8E8E]">Cash</div>
-            <div className="text-sm font-semibold text-[#171A20]">{fmtPct(plan.cashPct)} of portfolio</div>
-          </div>
-          <div className="text-right">
-            <div className="text-xs text-[#8E8E8E]">Target</div>
-            <div className="text-sm font-semibold text-[#8E8E8E]">{fmtPct(plan.cashTargetPct)}</div>
+        <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+          <label className="text-xs text-[#8E8E8E] block mb-1">Amount to Deploy (USD)</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number" min="0" step="100" value={deployInput}
+              onChange={e => setDeployInput(e.target.value)}
+              className="flex-1 px-3 py-2 text-sm border border-[#EEEEEE] rounded-lg focus:outline-none focus:border-[#3E6AE1]"
+              placeholder="e.g. 10000"
+            />
+            {portfolioTotal > 0 && (
+              <button onClick={() => setDeployInput(portfolioTotal.toFixed(0))}
+                className="text-[10px] px-2 py-1 rounded bg-[#EEF3FD] text-[#3E6AE1] hover:bg-[#DBEAFE] shrink-0">
+                Full
+              </button>
+            )}
           </div>
         </div>
 
@@ -2574,30 +2652,139 @@ function PlannerTab() {
         </div>
       </div>
 
-      {/* Role groups needing purchases */}
-      {plan.groups.length === 0 ? (
-        <div className="text-center py-10 text-sm text-[#AAAAAA]">
-          Portfolio is within target across every role group — no purchases needed right now.
+      {/* Allocation sliders */}
+      <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide">Target Allocation</div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold" style={{ color: isBalanced ? "#15803D" : "#DC2626" }}>
+              {totalPct.toFixed(0)}%{!isBalanced ? " ≠ 100" : " ✓"}
+            </span>
+            <button onClick={normalize}
+              className="text-[10px] px-2 py-1 rounded bg-[#F4F4F4] text-[#5C5E62] hover:bg-[#EEEEEE]">
+              Normalize
+            </button>
+            <button onClick={loadRegimeTemplate}
+              className="text-[10px] px-2 py-1 rounded bg-[#EEF3FD] text-[#3E6AE1] hover:bg-[#DBEAFE]">
+              {regime} template
+            </button>
+          </div>
         </div>
-      ) : (
-        <div className="space-y-3">
-          {plan.groups.map(g => {
-            const color = ROLE_COLOR[g.role] ?? "#8E8E8E";
+        <div className="space-y-4">
+          {PLANNER_BUCKETS.map(b => {
+            const pct = sliders[b] ?? 0;
+            const dollars = deployAmount * pct / 100;
+            const color = BUCKET_COLOR[b] ?? "#8E8E8E";
             return (
-              <div key={g.role} className="bg-white border border-[#EEEEEE] rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-sm font-semibold" style={{ color }}>{g.role}</span>
-                  <span className="text-xs text-[#8E8E8E]">{fmtPct(g.currentPct)} → {fmtPct(g.targetPct)}</span>
-                  <span className="text-xs font-semibold ml-auto" style={{ color }}>Buy {fmt(g.gapUsd)}</span>
+              <div key={b}>
+                <div className="flex items-center gap-3 mb-1.5">
+                  <span className="text-sm font-medium w-32 shrink-0" style={{ color }}>
+                    {BUCKET_LABELS[b]}
+                  </span>
+                  <input
+                    type="range" min="0" max="100" step="1" value={pct}
+                    onChange={e => setSliders(prev => ({ ...prev, [b]: parseFloat(e.target.value) }))}
+                    className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
+                    style={{ accentColor: color }}
+                  />
+                  <div className="flex items-center gap-1 shrink-0">
+                    <input
+                      type="number" min="0" max="100" step="1" value={pct}
+                      onChange={e => {
+                        const v = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                        setSliders(prev => ({ ...prev, [b]: v }));
+                      }}
+                      className="w-12 px-2 py-0.5 text-sm border border-[#EEEEEE] rounded text-right focus:outline-none focus:border-[#3E6AE1]"
+                    />
+                    <span className="text-xs text-[#8E8E8E]">%</span>
+                  </div>
+                  <span className="text-xs text-[#8E8E8E] w-20 text-right shrink-0 tabular-nums">
+                    {deployAmount > 0 ? fmt(dollars) : "—"}
+                  </span>
                 </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Ticker picks + tranche tables — per-ticker calculation */}
+      <div className="space-y-3">
+        <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide">Ticker Picks &amp; Tranches</div>
+        {PLANNER_BUCKETS.filter(b => (sliders[b] ?? 0) > 0).map(b => {
+          const bucketTarget = deployAmount * (sliders[b] ?? 0) / 100;
+          const tickers = bucketTickers[b];
+          const perTickerTarget = tickers.length > 0 ? bucketTarget / tickers.length : 0;
+          const color = BUCKET_COLOR[b] ?? "#8E8E8E";
+
+          // Per-ticker: target, have, to buy
+          const tickerRows = tickers.map(ticker => {
+            const have = currentTickerUsd[ticker] ?? 0;
+            const toBuy = Math.max(0, perTickerTarget - have);
+            return { ticker, target: perTickerTarget, have, toBuy };
+          });
+          const bucketToBuy = tickerRows.reduce((s, r) => s + r.toBuy, 0);
+
+          return (
+            <div key={b} className="bg-white border border-[#EEEEEE] rounded-xl p-4">
+              {/* Bucket header */}
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-sm font-semibold" style={{ color }}>{BUCKET_LABELS[b]}</span>
+                <span className="text-xs text-[#8E8E8E]">{(sliders[b] ?? 0).toFixed(0)}%</span>
+                {deployAmount > 0 && tickers.length > 0 && (
+                  <span className="text-xs text-[#8E8E8E]">
+                    · Target {fmt(bucketTarget)}
+                    {bucketToBuy > 0
+                      ? <span className="font-semibold ml-1" style={{ color }}> · Buy {fmt(bucketToBuy)}</span>
+                      : <span className="text-[#15803D] font-semibold ml-1"> · Full ✓</span>
+                    }
+                  </span>
+                )}
+              </div>
+
+              {/* Ticker chips */}
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                {tickers.map(t => {
+                  const isOwned = ownedTickers.has(t);
+                  return (
+                    <span key={t} className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full"
+                      style={{ backgroundColor: color + "1A", color }}>
+                      <span style={{ color: isOwned ? "#2d7d46" : undefined, opacity: isOwned ? 1 : 0.5 }}>
+                        {isOwned ? "●" : "○"}
+                      </span>
+                      {t}
+                      {!isOwned && (
+                        <button onClick={() => removeTicker(b, t)} className="hover:opacity-60 leading-none">×</button>
+                      )}
+                    </span>
+                  );
+                })}
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text" placeholder="Add candidate…"
+                    value={tickerInputs[b]}
+                    onChange={e => setTickerInputs(prev => ({ ...prev, [b]: e.target.value.toUpperCase() }))}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addTicker(b); } }}
+                    className="w-28 px-2 py-1 text-xs border border-[#EEEEEE] rounded focus:outline-none focus:border-[#3E6AE1]"
+                  />
+                  <button onClick={() => addTicker(b)}
+                    className="text-xs px-2 py-1 rounded bg-[#F4F4F4] text-[#5C5E62] hover:bg-[#EEEEEE]">
+                    + Add
+                  </button>
+                </div>
+              </div>
+
+              {/* Per-ticker tranche table */}
+              {tickers.length > 0 && deployAmount > 0 && (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-[#EEEEEE]">
                         <th className="text-left pb-2 text-[#8E8E8E] font-medium">Ticker</th>
-                        <th className="text-right pb-2 text-[#8E8E8E] font-medium">Score</th>
                         <th className="text-right pb-2 text-[#8E8E8E] font-medium">$/shr</th>
-                        <th className="text-right pb-2 text-[#8E8E8E] font-medium">Allocate</th>
+                        <th className="text-right pb-2 text-[#8E8E8E] font-medium">Target</th>
+                        <th className="text-right pb-2 text-[#8E8E8E] font-medium">Have</th>
+                        <th className="text-right pb-2 text-[#8E8E8E] font-medium">To Buy</th>
                         {[0, 1, 2].map(i => (
                           <th key={i} className="text-right pb-2 font-semibold" style={{ color }}>
                             T{i + 1}
@@ -2607,20 +2794,26 @@ function PlannerTab() {
                       </tr>
                     </thead>
                     <tbody>
-                      {g.recommendations.map(rec => (
-                        <tr key={rec.ticker} className="border-b border-[#F4F4F4] last:border-0">
-                          <td className="py-2">
-                            <span className="font-semibold text-[#171A20]">{rec.ticker}</span>
-                            <span className="block text-[10px] text-[#AAAAAA]">{rec.companyName}</span>
-                          </td>
-                          <td className="py-2 text-right tabular-nums text-[#8E8E8E]">{rec.objectiveScore.toFixed(0)}</td>
+                      {tickerRows.map(row => {
+                        const price = currentTickerPrice[row.ticker];
+                        return (
+                        <tr key={row.ticker} className="border-b border-[#F4F4F4] last:border-0">
+                          <td className="py-2 font-semibold text-[#171A20]">{row.ticker}</td>
                           <td className="py-2 text-right tabular-nums text-[#8E8E8E]">
-                            {rec.price ? `$${rec.price.toFixed(2)}` : "—"}
+                            {price ? `$${price.toFixed(2)}` : "—"}
                           </td>
-                          <td className="py-2 text-right tabular-nums font-semibold text-[#171A20]">{fmt(rec.suggestedUsd)}</td>
+                          <td className="py-2 text-right tabular-nums text-[#8E8E8E]">{fmt(row.target)}</td>
+                          <td className="py-2 text-right tabular-nums text-[#8E8E8E]">
+                            {row.have > 0 ? fmt(row.have) : "—"}
+                          </td>
+                          <td className="py-2 text-right tabular-nums font-semibold"
+                            style={{ color: row.toBuy > 0 ? "#171A20" : "#15803D" }}>
+                            {row.toBuy > 0 ? fmt(row.toBuy) : "Full ✓"}
+                          </td>
                           {[0, 1, 2].map(i => {
-                            const amt = trancheSum > 0 ? rec.suggestedUsd * tranchePcts[i] / trancheSum : 0;
-                            const shs = rec.price && amt > 0 ? amt / rec.price : null;
+                            const amt = row.toBuy > 0 && trancheSum > 0
+                              ? row.toBuy * tranchePcts[i] / trancheSum : 0;
+                            const shs = price && amt > 0 ? amt / price : null;
                             return (
                               <td key={i} className="py-2 text-right tabular-nums"
                                 style={{ color: amt > 0 ? color : "#AAAAAA" }}>
@@ -2638,13 +2831,69 @@ function PlannerTab() {
                             );
                           })}
                         </tr>
-                      ))}
+                        );
+                      })}
+                      {tickers.length > 1 && (
+                        <tr className="bg-[#F9F9F9]">
+                          <td className="py-1.5 text-[#8E8E8E] font-medium pl-0.5" colSpan={4}>Bucket total</td>
+                          <td className="py-1.5 text-right tabular-nums font-semibold text-[#171A20]">
+                            {fmt(bucketToBuy)}
+                          </td>
+                          {[0, 1, 2].map(i => {
+                            const amt = trancheSum > 0 ? bucketToBuy * tranchePcts[i] / trancheSum : 0;
+                            return (
+                              <td key={i} className="py-1.5 text-right tabular-nums font-semibold" style={{ color }}>
+                                {fmt(amt)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
-              </div>
+              )}
+              {tickers.length === 0 && (
+                <div className="text-xs text-[#AAAAAA] text-center py-2">No holdings in this bucket — add candidates above</div>
+              )}
+            </div>
+          );
+        })}
+
+        {!PLANNER_BUCKETS.some(b => (sliders[b] ?? 0) > 0) && (
+          <div className="text-center py-6 text-sm text-[#AAAAAA]">Set allocation % above to see bucket sections</div>
+        )}
+      </div>
+
+      {/* Grand summary */}
+      {hasAnyTickers && deployAmount > 0 && trancheSum === 100 && (
+        <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl p-4">
+          <div className="text-xs font-semibold text-[#15803D] uppercase tracking-wide mb-3">Total Deployment</div>
+          {(() => {
+            const grandToBuy = PLANNER_BUCKETS.reduce((s, b) => {
+              const tickers = bucketTickers[b];
+              if (tickers.length === 0) return s;
+              const perTarget = deployAmount * (sliders[b] ?? 0) / 100 / tickers.length;
+              return s + tickers.reduce((ts, t) => ts + Math.max(0, perTarget - (currentTickerUsd[t] ?? 0)), 0);
+            }, 0);
+            return (
+              <>
+                <div className="grid grid-cols-3 gap-3">
+                  {[0, 1, 2].map(i => (
+                    <div key={i} className="bg-white rounded-xl p-3 text-center">
+                      <div className="text-xs text-[#8E8E8E] mb-0.5">T{i + 1}</div>
+                      <div className="text-base font-bold text-[#15803D]">
+                        {fmt(grandToBuy * tranchePcts[i] / 100)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 text-[10px] text-center text-[#15803D]">
+                  Total to buy: <span className="font-semibold">{fmt(grandToBuy)}</span>
+                </div>
+              </>
             );
-          })}
+          })()}
         </div>
       )}
     </div>
