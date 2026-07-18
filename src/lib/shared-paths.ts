@@ -65,8 +65,13 @@ export function resolveInvestmentOsDataPath(): string | null {
   return fs.existsSync(p) ? p : null;
 }
 
-/** Returns the Brain OS subfolder, or null if not found. */
+/** Returns the Brain OS folder, or null if not found. */
 export function resolveBrainOsPath(): string | null {
+  // Docker deploys mount Brain OS directly (no multi-machine "Shared" root
+  // to discover) — BRAIN_OS_ROOT is the source of truth when set.
+  const envBrainOs = process.env.BRAIN_OS_ROOT;
+  if (envBrainOs && fs.existsSync(envBrainOs)) return envBrainOs;
+
   const root = resolveSharedPath();
   if (!root) return null;
   const p = path.join(root, "Brain OS");

@@ -6,8 +6,8 @@ export async function GET() {
   const brainOs = resolveBrainOsPath();
   const data = resolveInvestmentOsDataPath();
   return NextResponse.json({
-    path: root,
-    status: root ? "connected" : "missing",
+    path: root ?? brainOs,
+    status: root || brainOs ? "connected" : "missing",
     brainOsPath: brainOs,
     dataPath: data,
   });
