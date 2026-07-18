@@ -406,7 +406,7 @@ function DiscoveryPulseCard({ scoutData, scoutLoading, signals, signalsLoading }
           <div className="text-[10px] font-semibold text-[#AAAAAA] uppercase tracking-widest">Discovery Pulse</div>
           <div className="text-xs text-[#8E8E8E] mt-0.5">Top signals across scout + radar</div>
         </div>
-        <Link href="/discovery?tab=mentions" className="text-[11px] text-[#3E6AE1] hover:underline font-medium">All →</Link>
+        <Link href="/opportunities" className="text-[11px] text-[#3E6AE1] hover:underline font-medium">All →</Link>
       </div>
 
       {isLoading ? (
@@ -652,7 +652,7 @@ function DecisionQueueCard() {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export default function DashboardPage() {
+export default function OverviewTab() {
   const [brief, setBrief]                 = useState<MorningBrief | null>(null);
   const [archReview, setArchReview]       = useState<ArchitectureReview | null>(null);
   const [opportunities, setOpportunities] = useState<OpportunityEntry[]>([]);
@@ -714,12 +714,9 @@ export default function DashboardPage() {
     }).finally(() => setLoading(false));
   }, []);
 
-  const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-
   if (loading) {
     return (
-      <div className="p-6 lg:p-8 space-y-6 max-w-5xl">
-        <Skeleton className="h-8 w-56" />
+      <div className="space-y-6">
         <Skeleton className="h-48" />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-40" />)}
@@ -729,12 +726,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-5xl">
-      <div>
-        <h1 className="text-2xl font-medium text-[#171A20]">Dashboard</h1>
-        <p className="text-[#8E8E8E] text-sm mt-0.5">{today}</p>
-      </div>
-
+    <div className="space-y-6">
       {/* Row 0: Decision Queue — what to act on today */}
       <DecisionQueueCard />
 

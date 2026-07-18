@@ -598,7 +598,7 @@ function SumPill({ label, value, color }: { label: string; value: string; color:
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function DiscoveryPage() {
+export default function DiscoveryTab() {
   const [tab, setTab] = useState<Tab>("tierA");
   const [data, setData] = useState<DiscoveryRadarResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -677,26 +677,20 @@ export default function DiscoveryPage() {
     : { tierA: 0, tierB: 0, tierC: 0, themes: 0, gaps: 0, mentions: mentionBoard?.autoPromotedCount ?? 0 };
 
   return (
-    <div className="min-h-screen bg-[#F7F7F7]">
-      {/* Page header */}
-      <div className="bg-white border-b border-[#EEEEEE]">
-        <div className="max-w-6xl mx-auto">
-          <div className="px-5 lg:px-6 py-4 flex items-center justify-between">
-            <div>
-              <h1 className="text-lg font-semibold text-[#171A20]">Discovery Radar</h1>
-              <p className="text-xs text-[#AAAAAA] mt-0.5">Phase 12B · Research pipeline — what to study next</p>
-            </div>
-            {data && (
-              <p className="text-[11px] text-[#AAAAAA]">
-                Updated {new Date(data.summary.generatedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
-              </p>
-            )}
-          </div>
-          <TabBar active={tab} onChange={setTab} counts={counts} />
+    <div>
+      {/* Sub-tab bar */}
+      <div className="bg-white border border-[#EEEEEE] rounded-t-xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 lg:px-6 pt-3">
+          {data && (
+            <p className="text-[11px] text-[#AAAAAA] ml-auto">
+              Updated {new Date(data.summary.generatedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
+            </p>
+          )}
         </div>
+        <TabBar active={tab} onChange={setTab} counts={counts} />
       </div>
 
-      <div className="max-w-6xl mx-auto">
+      <div>
         {loading && (
           <div className="p-5 lg:p-6 space-y-4">
             <Skeleton className="h-16" />

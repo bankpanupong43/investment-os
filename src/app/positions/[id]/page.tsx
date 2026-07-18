@@ -201,8 +201,8 @@ export default function PositionDetailPage() {
       <div className="p-6 lg:p-8 max-w-5xl">
         <div className="bg-white border border-[#EEEEEE] rounded-xl p-10 text-center">
           <div className="text-[#393C41] font-medium mb-2">Position not found</div>
-          <Link href="/holdings" style={{ transition: "color 0.33s" }} className="text-[#3E6AE1] hover:text-[#2d5bc7] text-sm font-medium">
-            ← Back to Holdings
+          <Link href="/portfolio" style={{ transition: "color 0.33s" }} className="text-[#3E6AE1] hover:text-[#2d5bc7] text-sm font-medium">
+            ← Back to Portfolio
           </Link>
         </div>
       </div>
@@ -228,7 +228,7 @@ export default function PositionDetailPage() {
     <div className="p-6 lg:p-8 space-y-5 max-w-5xl">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-[#8E8E8E]">
-        <Link href="/holdings" style={{ transition: "color 0.33s" }} className="hover:text-[#393C41]">Holdings</Link>
+        <Link href="/portfolio" style={{ transition: "color 0.33s" }} className="hover:text-[#393C41]">Portfolio</Link>
         <span>→</span>
         <span className="text-[#393C41]">{position.ticker}</span>
       </div>

@@ -203,7 +203,7 @@ function EmptyState({ onRefresh, refreshing }: { onRefresh: () => void; refreshi
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function RadarPage() {
+export default function RadarTab() {
   const [tab, setTab] = useState<Tab>("small_cap");
   const [candidates, setCandidates] = useState<CandidateRow[]>([]);
   const [themes, setThemes] = useState<ThemeSummary[]>([]);
@@ -295,8 +295,7 @@ export default function RadarPage() {
 
   if (loading) {
     return (
-      <div className="p-6 lg:p-8 max-w-6xl space-y-6">
-        <Skeleton className="h-12 w-72" />
+      <div className="space-y-6">
         <div className="flex gap-2"><Skeleton className="h-8 w-24" /><Skeleton className="h-8 w-24" /><Skeleton className="h-8 w-32" /></div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-56" />)}
@@ -306,17 +305,14 @@ export default function RadarPage() {
   }
 
   return (
-    <div className="p-6 lg:p-8 max-w-6xl space-y-5">
+    <div className="space-y-5">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-medium text-[#171A20]">Discovery Radar</h1>
-          <p className="text-sm text-[#8E8E8E] mt-0.5">
-            {candidates.length > 0
-              ? `${candidates.length} candidates · last scanned ${lastRefreshed ? fmtDate(lastRefreshed) : "—"}`
-              : "Surface emerging opportunities not yet in your workflow"}
-          </p>
-        </div>
+        <p className="text-sm text-[#8E8E8E]">
+          {candidates.length > 0
+            ? `${candidates.length} candidates · last scanned ${lastRefreshed ? fmtDate(lastRefreshed) : "—"}`
+            : "Surface emerging opportunities not yet in your workflow"}
+        </p>
         <button
           onClick={refresh}
           disabled={refreshing}

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { ALL_BUCKETS, BUCKET_LABELS, BUCKET_MAP, REGIME_TARGETS } from "@/lib/allocation-engine";
 import type { BucketId, AllocationGap, AllocationRecommendation, BucketAllocation, ConcentrationMetric, BucketDriverSummary } from "@/lib/allocation-engine";
 import type { SimulatorResult, ComparisonRow, RegimeMatrixRow, SimulatorMove, SimulationResult } from "@/lib/allocation-simulator";
+import OverviewTab from "@/components/portfolio/OverviewTab";
+import PositionsTab from "@/components/portfolio/PositionsTab";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -21,8 +23,10 @@ function Skeleton({ className = "" }: { className?: string }) {
   return <div className={`bg-[#EEEEEE] rounded-xl animate-pulse ${className}`} />;
 }
 
-type TabId = "holdings" | "allocation" | "planner" | "themes" | "simulator" | "architecture" | "hedge" | "decisions" | "history";
+type TabId = "overview" | "positions" | "holdings" | "allocation" | "planner" | "themes" | "simulator" | "architecture" | "hedge" | "decisions" | "history";
 const TABS: { id: TabId; label: string }[] = [
+  { id: "overview",     label: "Overview" },
+  { id: "positions",    label: "Positions" },
   { id: "holdings",     label: "Holdings" },
   { id: "allocation",   label: "Allocation" },
   { id: "planner",      label: "Buy Planner" },
@@ -2903,7 +2907,7 @@ function PlannerTab() {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function PortfolioPage() {
-  const [tab, setTab] = useState<TabId>("holdings");
+  const [tab, setTab] = useState<TabId>("overview");
 
   return (
     <div className="max-w-4xl mx-auto py-8 px-4 md:px-6 space-y-6">
@@ -2932,6 +2936,8 @@ export default function PortfolioPage() {
         </div>
 
         <div className="p-4">
+          {tab === "overview"     && <OverviewTab />}
+          {tab === "positions"    && <PositionsTab />}
           {tab === "holdings"     && <HoldingsTab />}
           {tab === "allocation"   && <AllocationTab />}
           {tab === "planner"      && <PlannerTab />}

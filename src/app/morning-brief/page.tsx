@@ -579,7 +579,7 @@ function DiscoveryRadarSection({ dr }: { dr: CIOBriefDocument["discoveryRadar"] 
     <Section label="Discovery Radar">
       <p className="text-xs text-[#AAAAAA] mb-4">
         {dr.totalCandidates} candidates active · {dr.portfolioGapCount} portfolio gap{dr.portfolioGapCount !== 1 ? "s" : ""}
-        &nbsp;·&nbsp; <a href="/discovery" className="text-[#3E6AE1] hover:underline">Open Discovery Radar</a>
+        &nbsp;·&nbsp; <a href="/opportunities" className="text-[#3E6AE1] hover:underline">Open Discovery Radar</a>
       </p>
       {dr.tierA.length > 0 && (
         <>

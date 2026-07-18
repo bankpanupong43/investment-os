@@ -132,7 +132,7 @@ export default function ResearchDossierPage() {
   if (!dossier && error === "not_found") {
     return (
       <div className="p-6 lg:p-8 max-w-4xl">
-        <Link href="/dashboard" className="text-[11px] text-[#3E6AE1] hover:underline">← Dashboard</Link>
+        <Link href="/portfolio" className="text-[11px] text-[#3E6AE1] hover:underline">← Portfolio</Link>
         <div className="mt-6 bg-white border border-[#EEEEEE] rounded-xl p-8 text-center">
           <div className="text-[#171A20] font-semibold mb-2">{theme}</div>
           <p className="text-sm text-[#8E8E8E] mb-4">No dossier exists for this theme yet.</p>
@@ -166,7 +166,7 @@ export default function ResearchDossierPage() {
       {/* Header */}
       <div>
         <div className="flex items-center gap-2 mb-1">
-          <Link href="/dashboard" className="text-[11px] text-[#3E6AE1] hover:underline">← Dashboard</Link>
+          <Link href="/portfolio" className="text-[11px] text-[#3E6AE1] hover:underline">← Portfolio</Link>
           <span className="text-[11px] text-[#AAAAAA]">/</span>
           <span className="text-[11px] text-[#AAAAAA]">Research Dossier</span>
         </div>

@@ -3,6 +3,9 @@ import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import type { OpportunityEntry, OpportunityResult, DisagreementOpportunity, AgreementOpportunity } from "@/app/api/opportunities/route";
 import type { FeedbackType } from "@/app/api/feedback/route";
 import { WatchlistButton } from "@/components/watchlist-button";
+import ScreenerTab from "@/components/opportunities/ScreenerTab";
+import DiscoveryTab from "@/components/opportunities/DiscoveryTab";
+import RadarTab from "@/components/opportunities/RadarTab";
 
 // ─── Tier badge ───────────────────────────────────────────────────────────────
 
@@ -494,7 +497,7 @@ function filterAndSort(entries: OpportunityEntry[], tab: TabId): OpportunityEntr
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-type PageTab = "recommended" | "committee" | "agreement" | "disagreement" | "watchlist" | "screener";
+type PageTab = "recommended" | "committee" | "agreement" | "disagreement" | "watchlist" | "screener" | "discovery" | "radar";
 const PAGE_TABS: { id: PageTab; label: string }[] = [
   { id: "recommended",  label: "Top Ranked" },
   { id: "committee",    label: "Committee" },
@@ -502,6 +505,8 @@ const PAGE_TABS: { id: PageTab; label: string }[] = [
   { id: "disagreement", label: "Disagreement" },
   { id: "watchlist",    label: "Watchlist" },
   { id: "screener",     label: "Screener" },
+  { id: "discovery",    label: "Discovery" },
+  { id: "radar",        label: "Radar" },
 ];
 
 export default function OpportunitiesPage() {
@@ -512,10 +517,6 @@ export default function OpportunitiesPage() {
   const [activeTab, setActiveTab] = useState<TabId>("bestBuys");
   const [pageTab, setPageTab] = useState<PageTab>("recommended");
   const [feedbackMap, setFeedbackMap] = useState<Record<string, FeedbackType>>({});
-  const [screenerData, setScreenerData] = useState<{ ticker: string; companyName: string; totalScore: number; universeTier: string; sector: string | null }[]>([]);
-  const [screenerError, setScreenerError] = useState<string | null>(null);
-  const [screenerLoading, setScreenerLoading] = useState(false);
-  const screenerFetchedRef = useRef(false);
   const [committeeSessions, setCommitteeSessions] = useState<{ id: string; ticker: string; companyName: string; conviction: string; verdict: string; createdAt: string }[]>([]);
   const committeeFetchedRef = useRef(false);
 
@@ -551,25 +552,6 @@ export default function OpportunitiesPage() {
         setCommitteeSessions(latest);
       })
       .catch(() => {});
-  }, [pageTab]);
-
-  useEffect(() => {
-    if (pageTab !== "screener" || screenerFetchedRef.current) return;
-    screenerFetchedRef.current = true;
-    setScreenerLoading(true);
-    fetch("/api/screener")
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(d => {
-        type Row = { ticker: string; companyName: string; universeTier: string; sector: string | null; latestScore: { totalScore: number } | null };
-        const entries = (d.passed ?? d.all ?? []) as Row[];
-        setScreenerData(
-          entries
-            .map(e => ({ ticker: e.ticker, companyName: e.companyName, totalScore: e.latestScore?.totalScore ?? 0, universeTier: e.universeTier, sector: e.sector }))
-            .sort((a, b) => b.totalScore - a.totalScore)
-        );
-      })
-      .catch(() => setScreenerError("Failed to load screener data."))
-      .finally(() => setScreenerLoading(false));
   }, [pageTab]);
 
   const handleFeedback = useCallback((ticker: string, type: FeedbackType) => {
@@ -886,41 +868,11 @@ export default function OpportunitiesPage() {
             );
           })()}
 
-          {pageTab === "screener" && (
-            <div>
-              <p className="text-xs text-[#8E8E8E] mb-4">Universe ranked by company score. Use filters on the screener page for advanced filtering.</p>
-              {screenerLoading ? (
-                <div className="py-8 text-center text-sm text-[#8E8E8E]">Loading screener data…</div>
-              ) : screenerError ? (
-                <div className="py-8 text-center text-sm text-[#c0392b]">{screenerError}</div>
-              ) : screenerData.length === 0 ? (
-                <div className="py-8 text-center text-sm text-[#8E8E8E]">No companies in universe yet.</div>
-              ) : (
-                <div className="space-y-0">
-                  {screenerData.map((e, i) => {
-                    const scoreColor = e.totalScore >= 75 ? "#15803D" : e.totalScore >= 55 ? "#3E6AE1" : "#D97706";
-                    const tierLabel: Record<string, string> = { tier1: "LC", tier2: "MC", tier3: "SC", tier4: "ETF", tier5: "Intl" };
-                    return (
-                      <div key={e.ticker} className="flex items-center gap-3 py-2.5 border-b border-[#EEEEEE] last:border-0">
-                        <div className="w-7 text-[11px] text-[#AAAAAA] text-right shrink-0">{i + 1}</div>
-                        <div className="w-14 font-semibold text-[#171A20] shrink-0">{e.ticker}</div>
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#F4F4F4] text-[#5C5E62] shrink-0">
-                          {tierLabel[e.universeTier] ?? e.universeTier}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs text-[#5C5E62] truncate">{e.companyName}</div>
-                          {e.sector && <div className="text-[10px] text-[#AAAAAA]">{e.sector}</div>}
-                        </div>
-                        <div className="text-sm font-bold shrink-0" style={{ color: scoreColor }}>
-                          {e.totalScore.toFixed(0)}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
+          {pageTab === "screener" && <ScreenerTab />}
+
+          {pageTab === "discovery" && <DiscoveryTab />}
+
+          {pageTab === "radar" && <RadarTab />}
         </div>
       </div>
     </div>

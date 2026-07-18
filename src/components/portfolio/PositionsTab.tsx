@@ -67,7 +67,7 @@ function positionCostBasis(p: Pick<Position, "costBasisUsd" | "shares" | "avgCos
 
 const SELECT_CLS = "bg-white border border-[#EEEEEE] text-[#393C41] text-sm rounded px-3 py-1.5 focus:outline-none focus:border-[#3E6AE1]";
 
-export default function HoldingsPage() {
+export default function PositionsTab() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
   const [sectorFilter, setSectorFilter] = useState("all");
@@ -103,8 +103,7 @@ export default function HoldingsPage() {
 
   if (loading) {
     return (
-      <div className="p-6 lg:p-8 space-y-4 max-w-7xl">
-        <div className="h-7 w-48 bg-[#EEEEEE] rounded animate-pulse" />
+      <div className="space-y-4">
         <div className="h-10 bg-[#EEEEEE] rounded animate-pulse" />
         <div className="h-96 bg-[#EEEEEE] rounded-xl animate-pulse" />
       </div>
@@ -112,17 +111,7 @@ export default function HoldingsPage() {
   }
 
   return (
-    <div className="p-6 lg:p-8 space-y-5 max-w-7xl">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-medium text-[#171A20]">Holdings</h1>
-          <p className="text-[#8E8E8E] text-sm mt-0.5">
-            {filtered.length} position{filtered.length !== 1 ? "s" : ""} · {fmtShort(totalInvested)} total invested
-          </p>
-        </div>
-      </div>
-
+    <div className="space-y-5">
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-center">
         <div className="flex items-center gap-2">

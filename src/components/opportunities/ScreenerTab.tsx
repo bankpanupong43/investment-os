@@ -724,7 +724,7 @@ const TABS: { id: Tab; label: string }[] = [
 
 const SCORE_JOBS = ["universe_rescore", "fmp_refresh"];
 
-export default function ScreenerPage() {
+export default function ScreenerTab() {
   const [data, setData] = useState<ScreenerResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [recalculating, setRecalculating] = useState(false);
@@ -783,19 +783,14 @@ export default function ScreenerPage() {
   };
 
   return (
-    <div className="flex-1 min-h-screen bg-[#F4F4F4]">
-      <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
+    <div className="space-y-6">
 
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-semibold text-[#171A20]">Investment Universe</h1>
-            <p className="text-sm text-[#8E8E8E] mt-1">Ranked securities across all tiers — discover opportunities before AI research is applied</p>
-          </div>
-          <AddEntryForm onAdded={load} />
-        </div>
+      {/* Header */}
+      <div className="flex items-start justify-end gap-4 flex-wrap">
+        <AddEntryForm onAdded={load} />
+      </div>
 
-        {/* Stats row */}
+      {/* Stats row */}
         {data && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
@@ -869,7 +864,6 @@ export default function ScreenerPage() {
           </div>
         )}
 
-      </div>
     </div>
   );
 }

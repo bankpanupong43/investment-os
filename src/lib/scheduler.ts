@@ -10,7 +10,7 @@ import { runIntegrityChecks } from "./integrity-engine";
 import { ingestPortfolioFilings } from "./sec-ingestion";
 import { evaluatePortfolioThesisImpacts } from "./thesis-impact-engine";
 import { computeOpportunities, saveOpportunityScores } from "./opportunity-engine";
-import { generateMorningBrief, saveMorningBrief } from "./morning-brief-engine";
+import { runDailyDigest } from "./daily-digest";
 import { generateRadarCandidates, saveRadarCandidates } from "./radar-engine";
 import { generateBlueprint, saveBlueprint } from "./architect-engine";
 import { generateArchitectureReview, saveArchitectureReview, writeHedgeAuditToWiki } from "./architecture-review-engine";
@@ -491,81 +491,7 @@ async function runNewsletterRefresh_(): Promise<JobResult> {
 }
 
 async function runMorningBrief(): Promise<JobResult> {
-  const data = await generateMorningBrief();
-  const record = await saveMorningBrief(data);
-
-  // Build CIO brief document, generate narrative, archive to Brain OS, then email
-  try {
-    const { buildCIOBrief, renderCIOBriefMarkdown } = await import("./brief-generator");
-    const { renderNarrativeEmail } = await import("./html-email-exporter");
-    const { renderNarrativeBrief } = await import("./narrative-brief");
-    const { archiveBrief, archiveNarrative } = await import("./brief-archive-service");
-
-    const doc = await buildCIOBrief(data);
-    const md = renderCIOBriefMarkdown(doc);
-    const narrative = renderNarrativeBrief(doc);
-    const narrativeHtml = renderNarrativeEmail(narrative, doc);
-
-    archiveBrief(data.briefingDate, md, narrativeHtml);
-    archiveNarrative(data.briefingDate, narrative);
-
-    // Send narrative email — failure is recorded but does not fail morning_brief
-    const { sendBriefEmailWithTracking } = await import("./email-service");
-    const summary = doc.executiveSummary?.join(" ") ?? data.marketRegime;
-    await sendBriefEmailWithTracking(narrativeHtml, data.briefingDate, summary);
-  } catch (err) {
-    console.error("[morning_brief] CIO brief archive/email failed:", err);
-  }
-
-  // Update Brain OS wiki daily note + macro/geo pages from morning brief
-  try {
-    const { upsertDailyNote, appendMacroNote, appendGeopoliticsNote } = await import("./wiki-service");
-    const dateStr = data.briefingDate.toISOString().slice(0, 10);
-
-    const macroText = data.macroSummary.topics
-      .map((t: { topic: string; signal: string; insight: string }) => `**${t.topic}** (${t.signal}): ${t.insight}`)
-      .join("\n");
-    const geoText = data.geopoliticalSummary.risks
-      .map((r: { region: string; level: string; insight: string }) => `**${r.region}** (${r.level}): ${r.insight}`)
-      .join("\n");
-
-    appendMacroNote(macroText, dateStr);
-    appendGeopoliticsNote(geoText, dateStr);
-
-    // Append institutional research and newsletter consensus to macro wiki page
-    const institutionalItems: { source: string; title: string; summary: string[] }[] = data.institutionalResearch ?? [];
-    const newsletterItems: { source: string; title: string; summary: string[] }[]    = data.newsletterConsensus ?? [];
-
-    if (institutionalItems.length > 0) {
-      const institutionalText = "### Institutional Research\n" +
-        institutionalItems.map(i => `**${i.source}** — ${i.title}\n${(i.summary ?? []).slice(0, 2).join(" ")}`).join("\n\n");
-      appendMacroNote(institutionalText, dateStr);
-    }
-
-    if (newsletterItems.length > 0) {
-      const newsletterText = "### Newsletter Consensus\n" +
-        newsletterItems.map(i => `**${i.source}** — ${i.title}\n${(i.summary ?? []).slice(0, 2).join(" ")}`).join("\n\n");
-      appendMacroNote(newsletterText, dateStr);
-    }
-
-    upsertDailyNote({
-      date: dateStr,
-      regime: data.marketRegime,
-      keyEvents: data.marketRegimeEvidence ?? [],
-      macroUpdates: macroText,
-      geopoliticsUpdates: geoText,
-      actions: data.recommendedActions.map((a: { action: string }) => a.action),
-    });
-  } catch (err) {
-    console.error("[wiki] morning brief upsert failed:", err);
-  }
-
-  const actionCount = data.recommendedActions.length;
-  const eventCount = data.portfolioImpact.items?.length ?? 0;
-  return {
-    success: true,
-    summary: `Morning brief generated: ${data.marketRegime} regime. ${actionCount} actions. ${eventCount} daily events. Brief ID: ${record.id}`,
-  };
+  return runDailyDigest();
 }
 
 async function runThemeScout(): Promise<JobResult> {
