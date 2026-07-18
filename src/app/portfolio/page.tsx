@@ -1336,14 +1336,29 @@ function SimulatorTab() {
 
 // ─── Architecture tab ─────────────────────────────────────────────────────────
 
+interface ArchitectureRecommendation {
+  priority: "critical" | "high" | "medium" | "low";
+  category: "concentration" | "diversification" | "hedge" | "correlation" | "regime";
+  action: string;
+  detail: string;
+  ticker: string | null;
+}
+
 interface ArchitectureReviewSummary {
   id: string;
   reviewDate: string;
   marketRegime: string;
   architectureScore: { total: number; diversification: number; concentration: number; hedgeQuality: number; regimeResilience: number; grade: string; label: string };
-  recommendations: string[];
+  recommendations: ArchitectureRecommendation[];
   hedgeAudit?: { hedgeScore: number; verdict: string; hedgeStack: { gold: { tickers: string[]; allocationPct: number }; cash: { tickers: string[]; allocationPct: number }; defense: { tickers: string[]; allocationPct: number }; broadEtf: { tickers: string[]; allocationPct: number }; growthAssets: { tickers: string[]; allocationPct: number }; totalHedgePct: number } } | null;
 }
+
+const PRIORITY_STYLE: Record<string, { bg: string; text: string }> = {
+  critical: { bg: "#FEF2F2", text: "#991B1B" },
+  high:     { bg: "#FFFBEB", text: "#92400E" },
+  medium:   { bg: "#EEF3FD", text: "#3E6AE1" },
+  low:      { bg: "#F5F5F5", text: "#5C5E62" },
+};
 
 function ScoreRow({ label, score, color }: { label: string; score: number; color: string }) {
   return (
@@ -1438,13 +1453,24 @@ function ArchitectureTab() {
           {(review.recommendations ?? []).length > 0 && (
             <div className="bg-white border border-[#EEEEEE] rounded-xl p-4">
               <div className="text-xs font-semibold text-[#8E8E8E] uppercase tracking-wide mb-3">Recommendations</div>
-              <ul className="space-y-2">
-                {review.recommendations.map((r, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-[#5C5E62]">
-                    <span className="text-[#AAAAAA] mt-0.5">·</span>
-                    {r}
-                  </li>
-                ))}
+              <ul className="space-y-3">
+                {review.recommendations.map((r, i) => {
+                  const style = PRIORITY_STYLE[r.priority] ?? PRIORITY_STYLE.low;
+                  return (
+                    <li key={i} className="flex items-start gap-2 text-sm">
+                      <span
+                        className="shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded mt-0.5"
+                        style={{ backgroundColor: style.bg, color: style.text }}
+                      >
+                        {r.priority}
+                      </span>
+                      <div>
+                        <div className="text-[#171A20]">{r.action}</div>
+                        {r.detail && <div className="text-xs text-[#8E8E8E] mt-0.5">{r.detail}</div>}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
