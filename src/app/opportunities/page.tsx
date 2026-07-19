@@ -5,7 +5,6 @@ import type { FeedbackType } from "@/app/api/feedback/route";
 import { WatchlistButton } from "@/components/watchlist-button";
 import ScreenerTab from "@/components/opportunities/ScreenerTab";
 import DiscoveryTab from "@/components/opportunities/DiscoveryTab";
-import RadarTab from "@/components/opportunities/RadarTab";
 
 // ─── Tier badge ───────────────────────────────────────────────────────────────
 
@@ -497,7 +496,7 @@ function filterAndSort(entries: OpportunityEntry[], tab: TabId): OpportunityEntr
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-type PageTab = "recommended" | "committee" | "agreement" | "disagreement" | "watchlist" | "screener" | "discovery" | "radar";
+type PageTab = "recommended" | "committee" | "agreement" | "disagreement" | "watchlist" | "screener" | "discovery";
 const PAGE_TABS: { id: PageTab; label: string }[] = [
   { id: "recommended",  label: "Top Ranked" },
   { id: "committee",    label: "Committee" },
@@ -506,7 +505,6 @@ const PAGE_TABS: { id: PageTab; label: string }[] = [
   { id: "watchlist",    label: "Watchlist" },
   { id: "screener",     label: "Screener" },
   { id: "discovery",    label: "Discovery" },
-  { id: "radar",        label: "Radar" },
 ];
 
 export default function OpportunitiesPage() {
@@ -661,7 +659,8 @@ export default function OpportunitiesPage() {
 
       {/* Outer page tab bar */}
       <div className="bg-white border border-[#EEEEEE] rounded-xl overflow-hidden">
-        <div className="border-b border-[#EEEEEE] flex overflow-x-auto">
+        <div className="relative border-b border-[#EEEEEE]">
+        <div className="flex overflow-x-auto">
           {PAGE_TABS.map(pt => (
             <button key={pt.id} onClick={() => setPageTab(pt.id)}
               className="shrink-0 px-4 py-3 text-sm font-medium border-b-2 transition-colors"
@@ -688,6 +687,8 @@ export default function OpportunitiesPage() {
               )}
             </button>
           ))}
+        </div>
+        <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white to-transparent" />
         </div>
 
         <div className="p-4">
@@ -871,8 +872,6 @@ export default function OpportunitiesPage() {
           {pageTab === "screener" && <ScreenerTab />}
 
           {pageTab === "discovery" && <DiscoveryTab />}
-
-          {pageTab === "radar" && <RadarTab />}
         </div>
       </div>
     </div>

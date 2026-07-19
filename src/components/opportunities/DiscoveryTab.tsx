@@ -109,9 +109,10 @@ function TabBar({
 
 // ─── Candidate card ───────────────────────────────────────────────────────────
 
-function CandidateCard({ c, onPromote, promoting }: {
+function CandidateCard({ c, onPromote, onDismiss, promoting }: {
   c: TieredCandidate;
   onPromote: (ticker: string) => void;
+  onDismiss: (ticker: string) => void;
   promoting: string | null;
 }) {
   const ts = TIER_STYLE[c.tier];
@@ -146,17 +147,27 @@ function CandidateCard({ c, onPromote, promoting }: {
               </div>
             </div>
           </div>
-          <button
-            onClick={() => onPromote(c.ticker)}
-            disabled={promoting === c.ticker || c.status === "promoted"}
-            className={`text-[11px] px-3 py-1.5 rounded-lg font-medium transition-colors shrink-0 ${
-              c.status === "promoted"
-                ? "bg-[#eef7f1] text-[#2d7d46] cursor-default"
-                : "bg-[#171A20] text-white hover:bg-[#333] disabled:opacity-50"
-            }`}
-          >
-            {c.status === "promoted" ? "In Queue" : promoting === c.ticker ? "Adding…" : "Add to Queue"}
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {c.status !== "promoted" && (
+              <button
+                onClick={() => onDismiss(c.ticker)}
+                className="text-[11px] px-3 py-1.5 rounded-lg font-medium transition-colors text-[#8E8E8E] hover:text-[#c0392b] hover:bg-[#fdf0ee]"
+              >
+                Dismiss
+              </button>
+            )}
+            <button
+              onClick={() => onPromote(c.ticker)}
+              disabled={promoting === c.ticker || c.status === "promoted"}
+              className={`text-[11px] px-3 py-1.5 rounded-lg font-medium transition-colors shrink-0 ${
+                c.status === "promoted"
+                  ? "bg-[#eef7f1] text-[#2d7d46] cursor-default"
+                  : "bg-[#171A20] text-white hover:bg-[#333] disabled:opacity-50"
+              }`}
+            >
+              {c.status === "promoted" ? "In Queue" : promoting === c.ticker ? "Adding…" : "Add to Queue"}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -203,12 +214,13 @@ function CandidateCard({ c, onPromote, promoting }: {
 // ─── Tier tab ─────────────────────────────────────────────────────────────────
 
 function TierTab({
-  tier, candidates, promoting, onPromote, onRefresh,
+  tier, candidates, promoting, onPromote, onDismiss, onRefresh,
 }: {
   tier: "A" | "B" | "C";
   candidates: TieredCandidate[];
   promoting: string | null;
   onPromote: (ticker: string) => void;
+  onDismiss: (ticker: string) => void;
   onRefresh: () => void;
 }) {
   const ts = TIER_STYLE[tier];
@@ -251,7 +263,7 @@ function TierTab({
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {candidates.map(c => (
-            <CandidateCard key={c.ticker} c={c} onPromote={onPromote} promoting={promoting} />
+            <CandidateCard key={c.ticker} c={c} onPromote={onPromote} onDismiss={onDismiss} promoting={promoting} />
           ))}
         </div>
       )}
@@ -659,10 +671,25 @@ export default function DiscoveryTab() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticker, status: "promoted" }),
       });
-      load();
-    } finally {
+      fetch(`/api/research/${ticker}/generate`, { method: "POST" }).catch(() => {});
+      window.location.href = `/research?ticker=${ticker}`;
+    } catch {
       setPromoting(null);
     }
+  }
+
+  function handleDismiss(ticker: string) {
+    setData(prev => prev && {
+      ...prev,
+      tierA: prev.tierA.filter(c => c.ticker !== ticker),
+      tierB: prev.tierB.filter(c => c.ticker !== ticker),
+      tierC: prev.tierC.filter(c => c.ticker !== ticker),
+    });
+    fetch("/api/radar", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker, status: "dismissed" }),
+    }).catch(() => {});
   }
 
   const counts = data
@@ -728,13 +755,13 @@ export default function DiscoveryTab() {
             <SummaryBar summary={data.summary} newThisWeek={data.summary.newThisWeek} />
 
             {tab === "tierA" && (
-              <TierTab tier="A" candidates={data.tierA} promoting={promoting} onPromote={handlePromote} onRefresh={load} />
+              <TierTab tier="A" candidates={data.tierA} promoting={promoting} onPromote={handlePromote} onDismiss={handleDismiss} onRefresh={load} />
             )}
             {tab === "tierB" && (
-              <TierTab tier="B" candidates={data.tierB} promoting={promoting} onPromote={handlePromote} onRefresh={load} />
+              <TierTab tier="B" candidates={data.tierB} promoting={promoting} onPromote={handlePromote} onDismiss={handleDismiss} onRefresh={load} />
             )}
             {tab === "tierC" && (
-              <TierTab tier="C" candidates={data.tierC} promoting={promoting} onPromote={handlePromote} onRefresh={load} />
+              <TierTab tier="C" candidates={data.tierC} promoting={promoting} onPromote={handlePromote} onDismiss={handleDismiss} onRefresh={load} />
             )}
             {tab === "themes" && <ThemesTab themes={data.themes} />}
             {tab === "gaps" && <PortfolioGapsTab gaps={data.portfolioGaps} />}
